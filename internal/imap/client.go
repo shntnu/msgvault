@@ -42,6 +42,8 @@ type Client struct {
 	mailboxCache     []string             // cached list of selectable mailboxes
 	messageListCache []gmailapi.MessageID // full message ID list, built once per session
 	trashMailbox     string               // cached trash mailbox name
+	allMailFolder    string               // mailbox with \All attribute (empty if not detected)
+	msgIDToLabels    map[string][]string  // RFC822 Message-ID → mailbox memberships
 }
 
 // NewClient creates a new IMAP client.
@@ -102,6 +104,8 @@ func (c *Client) reconnect(ctx context.Context) error {
 	c.selectedMailbox = ""
 	c.mailboxCache = nil
 	c.messageListCache = nil
+	c.allMailFolder = ""
+	c.msgIDToLabels = nil
 	c.logger.Debug("reconnecting to IMAP server", "addr", c.config.Addr())
 	return c.connect(ctx)
 }
@@ -140,6 +144,7 @@ func (c *Client) selectMailbox(mailbox string) error {
 }
 
 // listMailboxesLocked returns all selectable mailboxes, caching the result.
+// Also detects special-use attributes (\Trash, \All) for later use.
 // Caller must hold mu.
 func (c *Client) listMailboxesLocked() ([]string, error) {
 	if c.mailboxCache != nil {
@@ -160,6 +165,9 @@ func (c *Client) listMailboxesLocked() ([]string, error) {
 		if c.trashMailbox == "" && hasAttr(item.Attrs, imap.MailboxAttrTrash) {
 			c.trashMailbox = item.Mailbox
 		}
+		if c.allMailFolder == "" && hasAttr(item.Attrs, imap.MailboxAttrAll) {
+			c.allMailFolder = item.Mailbox
+		}
 	}
 
 	// Fallback: look for common trash folder names
@@ -179,24 +187,6 @@ func (c *Client) listMailboxesLocked() ([]string, error) {
 
 	c.mailboxCache = names
 	return names, nil
-}
-
-// gmailAllMailFolder is the standard Gmail IMAP virtual folder that
-// contains every message in the account.
-const gmailAllMailFolder = "[Gmail]/All Mail"
-
-// mailboxesForListing returns the mailboxes to enumerate during a full
-// sync. On Gmail IMAP the same physical message appears in multiple
-// virtual folders (e.g. INBOX, Sent, All Mail), so listing all of
-// them produces duplicates. When the server has [Gmail]/All Mail we
-// enumerate only that folder — it contains every message exactly once.
-func mailboxesForListing(all []string) []string {
-	for _, mb := range all {
-		if mb == gmailAllMailFolder {
-			return []string{gmailAllMailFolder}
-		}
-	}
-	return all
 }
 
 // enumerateMailbox lists all UIDs in a single mailbox. It handles
@@ -257,9 +247,121 @@ func (c *Client) enumerateMailbox(
 	return uids, nil
 }
 
+// fetchMailboxMessageIDs fetches RFC822 Message-ID headers for all
+// UIDs in the given mailbox using ENVELOPE. Returns a map of
+// Message-ID → true for all messages found.
+// Caller must hold mu.
+func (c *Client) fetchMailboxMessageIDs(
+	ctx context.Context, mailbox string, uids []imap.UID,
+) (map[string]bool, error) {
+	if len(uids) == 0 {
+		return nil, nil
+	}
+
+	if err := c.selectMailbox(mailbox); err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]bool, len(uids))
+	fetchOpts := &imap.FetchOptions{
+		UID:      true,
+		Envelope: true,
+	}
+
+	for chunkStart := 0; chunkStart < len(uids); chunkStart += fetchChunkSize {
+		if ctx.Err() != nil {
+			return result, ctx.Err()
+		}
+
+		end := chunkStart + fetchChunkSize
+		if end > len(uids) {
+			end = len(uids)
+		}
+
+		var uidSet imap.UIDSet
+		for _, uid := range uids[chunkStart:end] {
+			uidSet.AddNum(uid)
+		}
+
+		msgs, err := c.conn.Fetch(uidSet, fetchOpts).Collect()
+		if err != nil {
+			if isNetworkError(err) {
+				if reconErr := c.reconnect(ctx); reconErr != nil {
+					return result, fmt.Errorf(
+						"reconnect failed fetching envelopes in %q: %w",
+						mailbox, reconErr)
+				}
+				if selErr := c.selectMailbox(mailbox); selErr != nil {
+					return result, selErr
+				}
+				msgs, err = c.conn.Fetch(uidSet, fetchOpts).Collect()
+				if err != nil {
+					return result, fmt.Errorf(
+						"envelope fetch failed in %q after reconnect: %w",
+						mailbox, err)
+				}
+			} else {
+				return result, fmt.Errorf(
+					"envelope fetch failed in %q: %w", mailbox, err)
+			}
+		}
+
+		for _, msg := range msgs {
+			if msg.Envelope != nil && msg.Envelope.MessageID != "" {
+				result[msg.Envelope.MessageID] = true
+			}
+		}
+	}
+	return result, nil
+}
+
+// buildLabelMap enumerates non-All-Mail mailboxes and fetches
+// Message-ID headers to build a Message-ID → mailbox membership map.
+// Caller must hold mu.
+func (c *Client) buildLabelMap(
+	ctx context.Context, allMailboxes []string,
+) error {
+	c.msgIDToLabels = make(map[string][]string)
+
+	for _, mailbox := range allMailboxes {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if mailbox == c.allMailFolder {
+			continue
+		}
+
+		uids, err := c.enumerateMailbox(ctx, mailbox)
+		if err != nil {
+			c.logger.Warn("skipping mailbox for label map",
+				"mailbox", mailbox, "error", err)
+			continue
+		}
+		if len(uids) == 0 {
+			continue
+		}
+
+		msgIDs, err := c.fetchMailboxMessageIDs(ctx, mailbox, uids)
+		if err != nil {
+			c.logger.Warn("failed to fetch envelopes for label map",
+				"mailbox", mailbox, "error", err)
+			continue
+		}
+
+		for msgID := range msgIDs {
+			c.msgIDToLabels[msgID] = append(
+				c.msgIDToLabels[msgID], mailbox)
+		}
+		c.logger.Debug("built label map for mailbox",
+			"mailbox", mailbox, "messages", len(msgIDs))
+	}
+	return nil
+}
+
 // buildMessageListCache enumerates mailboxes and populates
-// c.messageListCache. On Gmail IMAP only [Gmail]/All Mail is
-// enumerated to avoid duplicate imports of the same physical message.
+// c.messageListCache. When the server has an \All mailbox (Gmail),
+// only that folder is enumerated for canonical message IDs and a
+// label map is built from other mailboxes so labels are preserved.
 // Caller must hold mu and have an active connection.
 func (c *Client) buildMessageListCache(ctx context.Context) error {
 	allMailboxes, err := c.listMailboxesLocked()
@@ -275,14 +377,21 @@ func (c *Client) buildMessageListCache(ctx context.Context) error {
 		}
 	}
 
-	mailboxes := mailboxesForListing(allMailboxes)
-	if len(mailboxes) != len(allMailboxes) {
-		c.logger.Info("detected Gmail IMAP, listing only All Mail",
+	// Determine which mailboxes to list for canonical message IDs.
+	listMailboxes := allMailboxes
+	if c.allMailFolder != "" {
+		listMailboxes = []string{c.allMailFolder}
+		c.logger.Info("detected All Mail folder via \\All attribute",
+			"folder", c.allMailFolder,
 			"total_mailboxes", len(allMailboxes))
+
+		if err := c.buildLabelMap(ctx, allMailboxes); err != nil {
+			return err
+		}
 	}
 
 	var messages []gmailapi.MessageID
-	for _, mailbox := range mailboxes {
+	for _, mailbox := range listMailboxes {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -493,6 +602,7 @@ func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) (
 	results := make([]*gmailapi.RawMessage, len(messageIDs))
 	fetchOpts := &imap.FetchOptions{
 		UID:          true,
+		Envelope:     true, // needed for Message-ID label merging
 		InternalDate: true,
 		RFC822Size:   true,
 		BodySection:  []*imap.FetchItemBodySection{{}}, // empty section = entire message
@@ -585,10 +695,24 @@ func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) (
 					continue
 				}
 				msgID := compositeID(mailbox, msgBuf.UID)
+				labels := []string{mailbox}
+
+				// Merge labels from other mailboxes via the
+				// label map built during listing. The map keys
+				// on RFC822 Message-ID and maps to the other
+				// mailbox names the message appears in.
+				if c.msgIDToLabels != nil &&
+					msgBuf.Envelope != nil &&
+					msgBuf.Envelope.MessageID != "" {
+					if extra, ok := c.msgIDToLabels[msgBuf.Envelope.MessageID]; ok {
+						labels = append(labels, extra...)
+					}
+				}
+
 				results[idx] = &gmailapi.RawMessage{
 					ID:           msgID,
 					ThreadID:     msgID,
-					LabelIDs:     []string{mailbox},
+					LabelIDs:     labels,
 					InternalDate: msgBuf.InternalDate.UnixMilli(),
 					SizeEstimate: msgBuf.RFC822Size,
 					Raw:          rawMIME,
