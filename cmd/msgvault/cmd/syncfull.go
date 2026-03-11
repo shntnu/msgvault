@@ -225,8 +225,12 @@ func runFullSync(ctx context.Context, s *store.Store, oauthMgr *oauth.Manager, s
 	}
 	defer apiClient.Close()
 
-	// Build query from flags (Gmail only; ignored for IMAP)
+	// Build query from flags (Gmail only).
 	query := buildSyncQuery()
+	if query != "" && src.SourceType == "imap" {
+		fmt.Printf("Warning: --query/--before/--after are not supported for IMAP sources and will be ignored.\n\n")
+		query = ""
+	}
 
 	// Set up sync options
 	opts := sync.DefaultOptions()

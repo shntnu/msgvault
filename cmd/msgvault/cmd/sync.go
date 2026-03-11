@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	"github.com/wesm/msgvault/internal/gmail"
+	imaplib "github.com/wesm/msgvault/internal/imap"
 	"github.com/wesm/msgvault/internal/oauth"
 	"github.com/wesm/msgvault/internal/store"
 	"github.com/wesm/msgvault/internal/sync"
@@ -20,14 +21,17 @@ import (
 var syncIncrementalCmd = &cobra.Command{
 	Use:     "sync [email]",
 	Aliases: []string{"sync-incremental"},
-	Short:   "Sync new and changed messages from Gmail accounts",
+	Short:   "Sync new and changed messages from configured accounts",
 	Long: `Perform an incremental synchronization using the Gmail History API.
 
 This is faster than a full sync as it only fetches changes since the last sync.
 Requires a prior full sync to establish the history ID baseline.
 
-If no email is specified, syncs all accounts that have a history ID from a
-previous full sync. Accounts without tokens or history IDs are skipped.
+IMAP accounts do not support incremental sync, so they are automatically
+synced using a full sync instead.
+
+If no email is specified, syncs all accounts that have credentials configured.
+Accounts without tokens or history IDs are skipped.
 
 If history is too old (Gmail returns 404), falls back to suggesting a full sync.
 
@@ -48,64 +52,11 @@ Examples:
 			return fmt.Errorf("init schema: %w", err)
 		}
 
-		// Handle IMAP sources before checking OAuth: IMAP does not support
-		// incremental sync, so redirect to a full sync without requiring Gmail
-		// OAuth credentials.
-		if len(args) == 1 {
-			src, lookupErr := s.GetSourceByIdentifier(args[0])
-			if lookupErr != nil {
-				return fmt.Errorf("look up source: %w", lookupErr)
-			}
-			if src != nil && src.SourceType == "imap" {
-				fmt.Printf("Note: IMAP accounts do not support incremental sync. Running full sync instead.\n\n")
-				return runFullSync(cmd.Context(), s, nil, src)
-			}
-		}
-
-		// Gmail incremental sync requires OAuth.
-		if cfg.OAuth.ClientSecrets == "" {
-			return errOAuthNotConfigured()
-		}
-
-		// Create OAuth manager
-		oauthMgr, err := oauth.NewManager(cfg.OAuth.ClientSecrets, cfg.TokensDir(), logger)
-		if err != nil {
-			return wrapOAuthError(fmt.Errorf("create oauth manager: %w", err))
-		}
-
-		// Determine which accounts to sync (Gmail only for incremental sync)
-		var emails []string
-		if len(args) == 1 {
-			emails = []string{args[0]}
-		} else {
-			sources, err := s.ListSources("gmail")
-			if err != nil {
-				return fmt.Errorf("list sources: %w", err)
-			}
-			if len(sources) == 0 {
-				return fmt.Errorf("no Gmail accounts configured - run 'add-account' first")
-			}
-			for _, src := range sources {
-				if !src.SyncCursor.Valid || src.SyncCursor.String == "" {
-					fmt.Printf("Skipping %s (no history ID - run 'sync-full' first)\n", src.Identifier)
-					continue
-				}
-				if !oauthMgr.HasToken(src.Identifier) {
-					fmt.Printf("Skipping %s (no OAuth token - run 'add-account' first)\n", src.Identifier)
-					continue
-				}
-				emails = append(emails, src.Identifier)
-			}
-			if len(emails) == 0 {
-				return fmt.Errorf("no Gmail accounts have been fully synced yet - run 'sync-full' first")
-			}
-		}
-
-		// Set up context with cancellation
+		// Set up context with cancellation before any sync calls
+		// so Ctrl+C always saves checkpoints.
 		ctx, cancel := context.WithCancel(cmd.Context())
 		defer cancel()
 
-		// Handle Ctrl+C gracefully
 		sigChan := make(chan os.Signal, 1)
 		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 		go func() {
@@ -114,14 +65,112 @@ Examples:
 			cancel()
 		}()
 
+		// Handle IMAP sources: IMAP does not support incremental
+		// sync, so redirect to a full sync.
+		if len(args) == 1 {
+			src, lookupErr := s.GetSourceByIdentifier(args[0])
+			if lookupErr != nil {
+				return fmt.Errorf("look up source: %w", lookupErr)
+			}
+			if src != nil && src.SourceType == "imap" {
+				fmt.Printf("Note: IMAP accounts do not support incremental sync. Running full sync instead.\n\n")
+				return runFullSync(ctx, s, nil, src)
+			}
+		}
+
+		// Lazy OAuth init — only needed for Gmail sources.
+		var oauthMgr *oauth.Manager
+		getOAuthMgr := func() (*oauth.Manager, error) {
+			if oauthMgr != nil {
+				return oauthMgr, nil
+			}
+			if cfg.OAuth.ClientSecrets == "" {
+				return nil, errOAuthNotConfigured()
+			}
+			mgr, err := oauth.NewManager(cfg.OAuth.ClientSecrets, cfg.TokensDir(), logger)
+			if err != nil {
+				return nil, wrapOAuthError(fmt.Errorf("create oauth manager: %w", err))
+			}
+			oauthMgr = mgr
+			return oauthMgr, nil
+		}
+
+		// Determine which accounts to sync.
+		type syncTarget struct {
+			source *store.Source // nil for Gmail-by-email (no source record yet)
+			email  string
+		}
+		var gmailTargets []syncTarget
+		var imapTargets []*store.Source
+
+		if len(args) == 1 {
+			gmailTargets = []syncTarget{{email: args[0]}}
+		} else {
+			// Discover all sources.
+			allSources, err := s.ListSources("")
+			if err != nil {
+				return fmt.Errorf("list sources: %w", err)
+			}
+			if len(allSources) == 0 {
+				return fmt.Errorf("no accounts configured - run 'add-account' or 'add-imap' first")
+			}
+			for _, src := range allSources {
+				switch src.SourceType {
+				case "gmail":
+					mgr, mgrErr := getOAuthMgr()
+					if mgrErr != nil {
+						fmt.Printf("Skipping %s (OAuth not configured)\n", src.Identifier)
+						continue
+					}
+					if !src.SyncCursor.Valid || src.SyncCursor.String == "" {
+						fmt.Printf("Skipping %s (no history ID - run 'sync-full' first)\n", src.Identifier)
+						continue
+					}
+					if !mgr.HasToken(src.Identifier) {
+						fmt.Printf("Skipping %s (no OAuth token - run 'add-account' first)\n", src.Identifier)
+						continue
+					}
+					gmailTargets = append(gmailTargets, syncTarget{source: src, email: src.Identifier})
+				case "imap":
+					if !imaplib.HasCredentials(cfg.TokensDir(), src.Identifier) {
+						fmt.Printf("Skipping %s (no credentials - run 'add-imap' first)\n", src.Identifier)
+						continue
+					}
+					imapTargets = append(imapTargets, src)
+				default:
+					continue
+				}
+			}
+			if len(gmailTargets) == 0 && len(imapTargets) == 0 {
+				return fmt.Errorf("no accounts are ready to sync")
+			}
+		}
+
 		var syncErrors []string
-		for _, email := range emails {
+
+		// Sync IMAP sources via full sync.
+		for _, src := range imapTargets {
 			if ctx.Err() != nil {
 				break
 			}
+			fmt.Printf("Note: IMAP account %s does not support incremental sync. Running full sync.\n\n", src.Identifier)
+			if err := runFullSync(ctx, s, nil, src); err != nil {
+				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", src.Identifier, err))
+			}
+		}
 
-			if err := runIncrementalSync(ctx, s, oauthMgr, email); err != nil {
-				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", email, err))
+		// Sync Gmail sources via incremental sync.
+		for _, target := range gmailTargets {
+			if ctx.Err() != nil {
+				break
+			}
+			mgr, mgrErr := getOAuthMgr()
+			if mgrErr != nil {
+				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", target.email, mgrErr))
+				continue
+			}
+			if err := runIncrementalSync(ctx, s, mgr, target.email); err != nil {
+				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", target.email, err))
 				continue
 			}
 		}

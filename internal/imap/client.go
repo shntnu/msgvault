@@ -605,7 +605,7 @@ func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) (
 		Envelope:     true, // needed for Message-ID label merging
 		InternalDate: true,
 		RFC822Size:   true,
-		BodySection:  []*imap.FetchItemBodySection{{}}, // empty section = entire message
+		BodySection:  []*imap.FetchItemBodySection{{Peek: true}}, // BODY.PEEK[] to avoid marking \Seen
 	}
 
 	c.mu.Lock()

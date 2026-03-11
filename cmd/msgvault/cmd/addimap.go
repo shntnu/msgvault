@@ -2,7 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"syscall"
+	"os"
 
 	"github.com/spf13/cobra"
 	imapclient "github.com/wesm/msgvault/internal/imap"
@@ -54,7 +54,7 @@ Examples:
 		// Get password via secure interactive prompt only (never via flag to
 		// avoid exposure in shell history and process listings).
 		fmt.Printf("Password for %s@%s: ", imapUsername, imapHost)
-		raw, err := term.ReadPassword(int(syscall.Stdin))
+		raw, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Println()
 		if err != nil {
 			return fmt.Errorf("read password: %w", err)

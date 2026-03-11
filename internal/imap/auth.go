@@ -12,8 +12,8 @@ type credentialsFile struct {
 	Password string `json:"password"`
 }
 
-// credentialsPath returns the path to the credentials file for the given identifier.
-func credentialsPath(tokensDir, identifier string) string {
+// CredentialsPath returns the path to the credentials file for the given identifier.
+func CredentialsPath(tokensDir, identifier string) string {
 	hash := sha256.Sum256([]byte(identifier))
 	prefix := fmt.Sprintf("%x", hash[:8])
 	return filepath.Join(tokensDir, "imap_"+prefix+".json")
@@ -29,7 +29,7 @@ func SaveCredentials(tokensDir, identifier, password string) error {
 	if err != nil {
 		return err
 	}
-	path := credentialsPath(tokensDir, identifier)
+	path := CredentialsPath(tokensDir, identifier)
 	if err := os.WriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write credentials: %w", err)
 	}
@@ -38,7 +38,7 @@ func SaveCredentials(tokensDir, identifier, password string) error {
 
 // LoadCredentials loads an IMAP password for the given identifier.
 func LoadCredentials(tokensDir, identifier string) (string, error) {
-	path := credentialsPath(tokensDir, identifier)
+	path := CredentialsPath(tokensDir, identifier)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -55,7 +55,7 @@ func LoadCredentials(tokensDir, identifier string) (string, error) {
 
 // HasCredentials returns true if credentials exist for the given identifier.
 func HasCredentials(tokensDir, identifier string) bool {
-	path := credentialsPath(tokensDir, identifier)
+	path := CredentialsPath(tokensDir, identifier)
 	_, err := os.Stat(path)
 	return err == nil
 }
