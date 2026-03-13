@@ -386,9 +386,12 @@ func (c *Client) buildLabelMap(
 }
 
 // buildMessageListCache enumerates mailboxes and populates
-// c.messageListCache. When the server has an \All mailbox (Gmail),
-// only that folder is enumerated for canonical message IDs and a
-// label map is built from other mailboxes so labels are preserved.
+// c.messageListCache. On Gmail (detected via [Gmail]/ prefix),
+// only \All + Trash + Junk are enumerated since Gmail's All Mail
+// is a superset minus Trash/Spam. On non-Gmail servers with \All,
+// all selectable mailboxes are enumerated with RFC822 Message-ID
+// dedup to handle overlaps. A label map is built from non-\All
+// mailboxes so labels are preserved.
 // Caller must hold mu and have an active connection.
 func (c *Client) buildMessageListCache(ctx context.Context) error {
 	allMailboxes, err := c.listMailboxesLocked()
@@ -407,21 +410,28 @@ func (c *Client) buildMessageListCache(ctx context.Context) error {
 	// Determine which mailboxes to list for canonical message IDs.
 	listMailboxes := allMailboxes
 	if c.allMailFolder != "" {
-		// All Mail contains every message except Trash and Spam on
-		// Gmail IMAP. Include those mailboxes to avoid missing
-		// messages that are only in Trash or Spam.
-		listMailboxes = []string{c.allMailFolder}
-		if c.trashMailbox != "" {
-			listMailboxes = append(listMailboxes, c.trashMailbox)
+		isGmail := strings.HasPrefix(c.allMailFolder, "[Gmail]/")
+		if isGmail {
+			// Gmail's All Mail contains every message except Trash
+			// and Spam. Enumerate those alongside All Mail to catch
+			// messages only in those folders.
+			listMailboxes = []string{c.allMailFolder}
+			if c.trashMailbox != "" {
+				listMailboxes = append(
+					listMailboxes, c.trashMailbox)
+			}
+			if c.junkMailbox != "" {
+				listMailboxes = append(
+					listMailboxes, c.junkMailbox)
+			}
 		}
-		if c.junkMailbox != "" {
-			listMailboxes = append(listMailboxes, c.junkMailbox)
-		}
-		// Track Message-IDs to dedup on non-Gmail servers where
-		// All Mail may overlap with Trash/Spam.
+		// On non-Gmail servers with \All, enumerate all selectable
+		// mailboxes — \All may not be a superset of every folder.
+		// Enable dedup to handle overlaps regardless of server.
 		c.seenRFC822IDs = make(map[string]bool)
 		c.logger.Info("detected All Mail folder via \\All attribute",
 			"folder", c.allMailFolder,
+			"gmail", isGmail,
 			"trash", c.trashMailbox,
 			"junk", c.junkMailbox,
 			"total_mailboxes", len(allMailboxes))
