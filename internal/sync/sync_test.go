@@ -1577,6 +1577,11 @@ func TestDeriveThreadKey(t *testing.T) {
 			wantKey: "self@ex",
 		},
 		{
+			name:    "Multi-ID InReplyTo uses first entry",
+			msg:     &mime.Message{InReplyTo: "<a@ex> <b@ex>", MessageID: "<self@ex>"},
+			wantKey: "a@ex",
+		},
+		{
 			name:      "Empty when no threading info",
 			msg:       &mime.Message{},
 			wantEmpty: true,

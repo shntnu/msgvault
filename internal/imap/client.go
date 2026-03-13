@@ -777,12 +777,18 @@ func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) (
 				// Merge labels from other mailboxes via the
 				// label map built during listing. The map keys
 				// on RFC822 Message-ID and maps to the other
-				// mailbox names the message appears in.
+				// mailbox names the message appears in. Skip the
+				// current mailbox to avoid duplicates that would
+				// violate the message_labels primary key.
 				if c.msgIDToLabels != nil &&
 					msgBuf.Envelope != nil &&
 					msgBuf.Envelope.MessageID != "" {
 					if extra, ok := c.msgIDToLabels[msgBuf.Envelope.MessageID]; ok {
-						labels = append(labels, extra...)
+						for _, lbl := range extra {
+							if lbl != mailbox {
+								labels = append(labels, lbl)
+							}
+						}
 					}
 				}
 

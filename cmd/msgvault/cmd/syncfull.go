@@ -278,7 +278,11 @@ func runFullSync(ctx context.Context, s *store.Store, oauthMgr *oauth.Manager, s
 	summary, err := syncer.Full(ctx, src.Identifier)
 	if err != nil {
 		if ctx.Err() != nil {
-			fmt.Println("\nSync interrupted. Run again to resume.")
+			if opts.NoResume {
+				fmt.Println("\nSync interrupted. Run again to restart (already-imported messages will be skipped).")
+			} else {
+				fmt.Println("\nSync interrupted. Run again to resume.")
+			}
 			return nil
 		}
 		return fmt.Errorf("sync failed: %w", err)

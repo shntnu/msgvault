@@ -716,27 +716,40 @@ func joinEmails(addrs []mime.Address) string {
 // replies, then to the message's own Message-ID. Returns "" when
 // no threading info is available.
 //
-// Angle brackets are stripped for consistency: parseReferences
-// already strips them, but InReplyTo/MessageID retain them from
-// the raw header. Without normalization the root message (using
-// MessageID "<X>") and its replies (using References "X") would
-// get different thread keys.
+// InReplyTo is parsed as a msg-id list per RFC 2822 (it may
+// contain multiple IDs and comments); only the first valid ID
+// is used. Angle brackets are stripped for consistency with
+// parseReferences.
 func deriveThreadKey(parsed *mime.Message) string {
 	if len(parsed.References) > 0 {
 		return parsed.References[0]
 	}
 	if parsed.InReplyTo != "" {
-		return stripAngleBrackets(parsed.InReplyTo)
+		if ids := parseMsgIDList(parsed.InReplyTo); len(ids) > 0 {
+			return ids[0]
+		}
 	}
 	if parsed.MessageID != "" {
-		return stripAngleBrackets(parsed.MessageID)
+		if ids := parseMsgIDList(parsed.MessageID); len(ids) > 0 {
+			return ids[0]
+		}
 	}
 	return ""
 }
 
-// stripAngleBrackets removes surrounding < > from a message ID.
-func stripAngleBrackets(s string) string {
-	return strings.Trim(s, "<>")
+// parseMsgIDList splits a header value containing one or more
+// angle-bracketed message-IDs (as in References or In-Reply-To)
+// and returns them with brackets stripped. Tokens without angle
+// brackets are ignored per RFC 2822 msg-id syntax.
+func parseMsgIDList(s string) []string {
+	var result []string
+	for _, tok := range strings.Fields(s) {
+		tok = strings.Trim(tok, "<>")
+		if tok != "" {
+			result = append(result, tok)
+		}
+	}
+	return result
 }
 
 // extractSubjectFromSnippet attempts to extract a subject from the message snippet.
