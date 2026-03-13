@@ -168,12 +168,16 @@ Examples:
 			if ctx.Err() != nil {
 				break
 			}
+			if target.source == nil {
+				syncErrors = append(syncErrors, fmt.Sprintf("%s: no source found - run 'sync-full' first", target.email))
+				continue
+			}
 			mgr, mgrErr := getOAuthMgr()
 			if mgrErr != nil {
 				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", target.email, mgrErr))
 				continue
 			}
-			if err := runIncrementalSync(ctx, s, mgr, target.email); err != nil {
+			if err := runIncrementalSync(ctx, s, mgr, target.source); err != nil {
 				syncErrors = append(syncErrors, fmt.Sprintf("%s: %v", target.email, err))
 				continue
 			}
@@ -192,19 +196,12 @@ Examples:
 	},
 }
 
-func runIncrementalSync(ctx context.Context, s *store.Store, oauthMgr *oauth.Manager, email string) error {
-	// Check if source exists with history ID
-	source, err := s.GetSourceByIdentifier(email)
-	if err != nil {
-		return fmt.Errorf("get source: %w", err)
-	}
-	if source == nil {
-		return fmt.Errorf("no source found - run 'sync-full' first")
-	}
+func runIncrementalSync(ctx context.Context, s *store.Store, oauthMgr *oauth.Manager, source *store.Source) error {
 	if !source.SyncCursor.Valid || source.SyncCursor.String == "" {
 		return fmt.Errorf("no history ID - run 'sync-full' first")
 	}
 
+	email := source.Identifier
 	interactive := isatty.IsTerminal(os.Stdin.Fd()) ||
 		isatty.IsCygwinTerminal(os.Stdin.Fd())
 	tokenSource, err := getTokenSourceWithReauth(ctx, oauthMgr, email, interactive)
