@@ -98,20 +98,18 @@ func (c *Client) connect(ctx context.Context) error {
 	return nil
 }
 
-// reconnect closes the current connection and re-establishes it. Caller must hold mu.
+// reconnect closes the current connection and re-establishes it.
+// Only connection-level state is cleared; per-sync caches
+// (messageListCache, msgIDToLabels, seenRFC822IDs, mailbox
+// metadata) are preserved so callers can continue operating
+// after a transient disconnect.
+// Caller must hold mu.
 func (c *Client) reconnect(ctx context.Context) error {
 	if c.conn != nil {
 		_ = c.conn.Close()
 		c.conn = nil
 	}
 	c.selectedMailbox = ""
-	c.mailboxCache = nil
-	c.messageListCache = nil
-	c.trashMailbox = ""
-	c.junkMailbox = ""
-	c.allMailFolder = ""
-	c.msgIDToLabels = nil
-	c.seenRFC822IDs = nil
 	c.logger.Debug("reconnecting to IMAP server", "addr", c.config.Addr())
 	return c.connect(ctx)
 }
