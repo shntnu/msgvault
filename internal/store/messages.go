@@ -45,7 +45,8 @@ type Message struct {
 	ConversationID  int64
 	SourceID        int64
 	SourceMessageID string
-	MessageType     string // "email"
+	RFC822MessageID sql.NullString // RFC822 Message-ID header for cross-mailbox dedup
+	MessageType     string         // "email"
 	SentAt          sql.NullTime
 	ReceivedAt      sql.NullTime
 	InternalDate    sql.NullTime
@@ -83,6 +84,20 @@ func (s *Store) MessageExistsBatch(sourceID int64, sourceMessageIDs []string) (m
 		return nil, err
 	}
 	return result, nil
+}
+
+// MessageExistsByRFC822ID checks if a message with the given
+// RFC822 Message-ID already exists for this source.
+func (s *Store) MessageExistsByRFC822ID(
+	sourceID int64, rfc822ID string,
+) (bool, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM messages
+		 WHERE source_id = ? AND rfc822_message_id = ?`,
+		sourceID, rfc822ID,
+	).Scan(&count)
+	return count > 0, err
 }
 
 // MessageExistsWithRawBatch checks which message IDs already exist in the database
@@ -144,13 +159,15 @@ func (s *Store) EnsureConversation(sourceID int64, sourceConversationID, title s
 
 const upsertMessageSQL = `
 	INSERT INTO messages (
-		conversation_id, source_id, source_message_id, message_type,
+		conversation_id, source_id, source_message_id,
+		rfc822_message_id, message_type,
 		sent_at, received_at, internal_date, sender_id, is_from_me,
 		subject, snippet, size_estimate,
 		has_attachments, attachment_count, archived_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
 	ON CONFLICT(source_id, source_message_id) DO UPDATE SET
 		conversation_id = excluded.conversation_id,
+		rfc822_message_id = excluded.rfc822_message_id,
 		sent_at = excluded.sent_at,
 		received_at = excluded.received_at,
 		internal_date = excluded.internal_date,
@@ -169,7 +186,8 @@ func (s *Store) UpsertMessage(msg *Message) (int64, error) {
 
 func upsertMessage(q querier, msg *Message) (int64, error) {
 	args := []any{
-		msg.ConversationID, msg.SourceID, msg.SourceMessageID, msg.MessageType,
+		msg.ConversationID, msg.SourceID, msg.SourceMessageID,
+		msg.RFC822MessageID, msg.MessageType,
 		msg.SentAt, msg.ReceivedAt, msg.InternalDate, msg.SenderID, msg.IsFromMe,
 		msg.Subject, msg.Snippet, msg.SizeEstimate,
 		msg.HasAttachments, msg.AttachmentCount,

@@ -1686,6 +1686,47 @@ func TestIMAPThreading(t *testing.T) {
 	}
 }
 
+// TestIMAPCrossSyncDedup verifies that a message imported from one mailbox
+// is not re-imported when it appears under a different mailbox|uid on a
+// subsequent sync (e.g. moved from All Mail to Trash).
+func TestIMAPCrossSyncDedup(t *testing.T) {
+	env := newTestEnv(t)
+	env.SetOptions(t, func(o *Options) {
+		o.SourceType = "imap"
+	})
+
+	msg := testemail.NewMessage().
+		Subject("Dedup test").
+		Header("Message-ID", "<dedup@example.com>").
+		Body("Same message, different mailbox.").
+		Bytes()
+
+	// First sync: message is in All Mail
+	env.Mock.Profile.MessagesTotal = 1
+	env.Mock.Profile.HistoryID = 100
+	env.Mock.AddMessage("AllMail|42", msg, []string{"AllMail"})
+	summary := runFullSync(t, env)
+	assertSummary(t, summary, WantSummary{Added: intPtr(1)})
+
+	// Second sync: message moved to Trash (different composite ID)
+	delete(env.Mock.Messages, "AllMail|42")
+	env.Mock.AddMessage("Trash|99", msg, []string{"Trash"})
+	summary = runFullSync(t, env)
+	// Should be skipped via RFC822 Message-ID dedup, not re-imported
+	assertSummary(t, summary, WantSummary{Added: intPtr(0)})
+
+	// Only one message should exist in the database
+	var count int
+	err := env.Store.DB().QueryRow(
+		`SELECT COUNT(*) FROM messages`).Scan(&count)
+	if err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if count != 1 {
+		t.Errorf("expected 1 message, got %d (duplicate imported)", count)
+	}
+}
+
 // TestIncrementalSyncLabelRemovedWithMissingRaw verifies that removing a label
 // from a message whose raw MIME data is missing still succeeds. The label-removal
 // path operates on the message_labels table directly and never touches raw data.

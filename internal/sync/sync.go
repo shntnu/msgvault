@@ -212,6 +212,10 @@ func (s *Syncer) processBatch(ctx context.Context, sourceID int64, listResp *gma
 
 			threadID := threadIDs[newIDs[i]]
 			if err := s.ingestMessage(ctx, sourceID, raw, threadID, labelMap); err != nil {
+				if errors.Is(err, errDuplicateRFC822) {
+					result.skipped++
+					continue
+				}
 				s.logger.Warn("failed to ingest message", "id", raw.ID, "error", err)
 				checkpoint.ErrorsCount++
 				continue
@@ -511,10 +515,17 @@ func (s *Syncer) parseToModel(sourceID int64, raw *gmail.RawMessage, threadID st
 	}
 
 	// Build message record
+	rfc822ID := sql.NullString{}
+	if parsed.MessageID != "" {
+		rfc822ID = sql.NullString{
+			String: parsed.MessageID, Valid: true,
+		}
+	}
 	msg := &store.Message{
 		ConversationID:  conversationID,
 		SourceID:        sourceID,
 		SourceMessageID: raw.ID,
+		RFC822MessageID: rfc822ID,
 		MessageType:     "email",
 		SenderID:        senderID,
 		Subject:         sql.NullString{String: subject, Valid: subject != ""},
@@ -634,11 +645,33 @@ func (s *Syncer) persistMessage(data *messageData, labelMap map[string]int64) er
 	return nil
 }
 
+// errDuplicateRFC822 signals that a message was skipped because
+// another message with the same RFC822 Message-ID already exists
+// for this source. Used for cross-sync dedup on IMAP where
+// composite IDs change when messages move between mailboxes.
+var errDuplicateRFC822 = errors.New("duplicate RFC822 Message-ID")
+
 // ingestMessage parses and stores a single message.
 func (s *Syncer) ingestMessage(ctx context.Context, sourceID int64, raw *gmail.RawMessage, threadID string, labelMap map[string]int64) error {
 	data, err := s.parseToModel(sourceID, raw, threadID)
 	if err != nil {
 		return err
+	}
+
+	// For IMAP sources, check if a message with the same RFC822
+	// Message-ID already exists under a different composite ID.
+	// This handles messages that moved between mailboxes across
+	// syncs (e.g. All Mail → Trash changes the mailbox|uid key).
+	if s.opts.SourceType == "imap" &&
+		data.message.RFC822MessageID.Valid {
+		exists, err := s.store.MessageExistsByRFC822ID(
+			sourceID, data.message.RFC822MessageID.String)
+		if err != nil {
+			return fmt.Errorf("check rfc822 dedup: %w", err)
+		}
+		if exists {
+			return errDuplicateRFC822
+		}
 	}
 
 	return s.persistMessage(data, labelMap)

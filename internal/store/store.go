@@ -226,12 +226,20 @@ func (s *Store) InitSchema() error {
 		return fmt.Errorf("execute schema.sql: %w", err)
 	}
 
-	// Migration: add sync_config column to sources for databases created before
-	// IMAP support was added. SQLite returns "duplicate column name" if the
-	// column already exists, which we treat as success.
-	if _, err := s.db.Exec(`ALTER TABLE sources ADD COLUMN sync_config JSON`); err != nil {
-		if !isSQLiteError(err, "duplicate column name") {
-			return fmt.Errorf("migrate schema (sync_config): %w", err)
+	// Migrations: add columns for databases created before these features.
+	// SQLite returns "duplicate column name" if the column already exists,
+	// which we treat as success.
+	for _, m := range []struct {
+		sql  string
+		desc string
+	}{
+		{`ALTER TABLE sources ADD COLUMN sync_config JSON`, "sync_config"},
+		{`ALTER TABLE messages ADD COLUMN rfc822_message_id TEXT`, "rfc822_message_id"},
+	} {
+		if _, err := s.db.Exec(m.sql); err != nil {
+			if !isSQLiteError(err, "duplicate column name") {
+				return fmt.Errorf("migrate schema (%s): %w", m.desc, err)
+			}
 		}
 	}
 
