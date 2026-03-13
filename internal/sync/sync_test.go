@@ -1582,6 +1582,21 @@ func TestDeriveThreadKey(t *testing.T) {
 			wantKey: "a@ex",
 		},
 		{
+			name:    "InReplyTo with leading comment",
+			msg:     &mime.Message{InReplyTo: "(comment) <root@ex>"},
+			wantKey: "root@ex",
+		},
+		{
+			name:    "InReplyTo with folded whitespace",
+			msg:     &mime.Message{InReplyTo: "\r\n <root@ex>"},
+			wantKey: "root@ex",
+		},
+		{
+			name:      "Bare token without angle brackets ignored",
+			msg:       &mime.Message{InReplyTo: "bare-token"},
+			wantEmpty: true,
+		},
+		{
 			name:      "Empty when no threading info",
 			msg:       &mime.Message{},
 			wantEmpty: true,

@@ -737,17 +737,27 @@ func deriveThreadKey(parsed *mime.Message) string {
 	return ""
 }
 
-// parseMsgIDList splits a header value containing one or more
-// angle-bracketed message-IDs (as in References or In-Reply-To)
-// and returns them with brackets stripped. Tokens without angle
-// brackets are ignored per RFC 2822 msg-id syntax.
+// parseMsgIDList extracts angle-bracketed message-IDs from a
+// header value (In-Reply-To, Message-ID, References). Only
+// content inside < > pairs is returned, with brackets stripped.
+// Comments, CFWS, and bare tokens are ignored per RFC 2822
+// msg-id syntax.
 func parseMsgIDList(s string) []string {
 	var result []string
-	for _, tok := range strings.Fields(s) {
-		tok = strings.Trim(tok, "<>")
-		if tok != "" {
-			result = append(result, tok)
+	for {
+		open := strings.IndexByte(s, '<')
+		if open < 0 {
+			break
 		}
+		close := strings.IndexByte(s[open+1:], '>')
+		if close < 0 {
+			break
+		}
+		id := s[open+1 : open+1+close]
+		if id != "" {
+			result = append(result, id)
+		}
+		s = s[open+1+close+1:]
 	}
 	return result
 }
