@@ -27,13 +27,14 @@ type AccountInfo struct {
 	Description string
 }
 
-// Identifier returns the best identifier for this account: the email
-// address if available, otherwise the description.
+// Identifier returns a stable unique identifier for this account:
+// the email address if available, otherwise the GUID to avoid
+// collisions between local accounts that share a description.
 func (a AccountInfo) Identifier() string {
 	if a.Email != "" {
 		return a.Email
 	}
-	return a.Description
+	return a.GUID
 }
 
 // DefaultAccountsDBPath returns the default path to Apple's

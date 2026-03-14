@@ -219,9 +219,9 @@ func TestAccountInfo_Identifier(t *testing.T) {
 			want: "user@gmail.com",
 		},
 		{
-			name: "no email uses description",
-			info: AccountInfo{Email: "", Description: "On My Mac"},
-			want: "On My Mac",
+			name: "no email uses GUID",
+			info: AccountInfo{GUID: "LOCALONLY-0000-0000-0000-000000000000", Email: "", Description: "On My Mac"},
+			want: "LOCALONLY-0000-0000-0000-000000000000",
 		},
 	}
 
