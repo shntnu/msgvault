@@ -180,13 +180,16 @@ func ImportEmlxDir(
 					cp.ErrorsCount = active.ErrorsCount
 					startMbox = ecp.MailboxIndex
 					startAfter = ecp.LastFile
-					// Normalize legacy checkpoints that stored bare
-					// filenames (e.g. "1.emlx") instead of full paths.
+					// Legacy checkpoints stored bare filenames
+					// (e.g. "1.emlx"); resolve against the actual
+					// file list to find the full path. This handles
+					// partitioned V10 layouts where files may be in
+					// different Messages/ subdirectories.
 					if startAfter != "" &&
 						!filepath.IsAbs(startAfter) {
-						startAfter = filepath.Join(
-							mailboxes[ecp.MailboxIndex].MsgDir,
+						startAfter = resolveCheckpointFile(
 							startAfter,
+							mailboxes[ecp.MailboxIndex].Files,
 						)
 					}
 					summary.WasResumed = true
@@ -566,6 +569,24 @@ func ImportEmlxDir(
 	}
 
 	return summary, nil
+}
+
+// resolveCheckpointFile finds the full path in files whose basename
+// matches the legacy bare filename from an older checkpoint. Returns
+// the last matching full path (since files are sorted, this is the
+// one the checkpoint would have referred to). If no match is found,
+// returns the original basename as a fallback.
+func resolveCheckpointFile(basename string, files []string) string {
+	var match string
+	for _, f := range files {
+		if filepath.Base(f) == basename {
+			match = f
+		}
+	}
+	if match != "" {
+		return match
+	}
+	return basename
 }
 
 func saveEmlxCheckpoint(
