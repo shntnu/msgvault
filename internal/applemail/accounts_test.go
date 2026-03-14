@@ -296,10 +296,10 @@ func TestFindV10GUIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Create V2 with another UUID.
+	// Create V2 with another UUID — should be ignored (V10 is newer).
 	v2 := filepath.Join(mailDir, "V2")
-	guid2 := "11111111-2222-3333-4444-555555555555"
-	if err := os.MkdirAll(filepath.Join(v2, guid2), 0o755); err != nil {
+	staleGUID := "11111111-2222-3333-4444-555555555555"
+	if err := os.MkdirAll(filepath.Join(v2, staleGUID), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -313,19 +313,68 @@ func TestFindV10GUIDs(t *testing.T) {
 		t.Fatalf("findV10GUIDs: %v", err)
 	}
 
-	if len(guids) != 2 {
-		t.Fatalf("got %d GUIDs, want 2: %v", len(guids), guids)
+	if len(guids) != 1 {
+		t.Fatalf("got %d GUIDs, want 1 (only from newest V dir): %v", len(guids), guids)
 	}
 
-	seen := make(map[string]bool)
-	for _, g := range guids {
-		seen[g] = true
+	if guids[0] != guid {
+		t.Errorf("got GUID %s, want %s (from V10)", guids[0], guid)
+	}
+}
+
+func TestNewestVDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		dirs    []string
+		wantDir string
+	}{
+		{
+			name:    "single V10",
+			dirs:    []string{"V10"},
+			wantDir: "V10",
+		},
+		{
+			name:    "V2 and V10 picks V10",
+			dirs:    []string{"V2", "V10"},
+			wantDir: "V10",
+		},
+		{
+			name:    "V9 and V10 picks V10",
+			dirs:    []string{"V9", "V10"},
+			wantDir: "V10",
+		},
+		{
+			name:    "no V dirs",
+			dirs:    []string{"Other", "MailData"},
+			wantDir: "",
+		},
 	}
 
-	if !seen[guid] {
-		t.Errorf("expected GUID %s", guid)
-	}
-	if !seen[guid2] {
-		t.Errorf("expected GUID %s", guid2)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mailDir := t.TempDir()
+			for _, d := range tt.dirs {
+				if err := os.MkdirAll(filepath.Join(mailDir, d), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			got, err := newestVDir(mailDir)
+			if err != nil {
+				t.Fatalf("newestVDir: %v", err)
+			}
+
+			if tt.wantDir == "" {
+				if got != "" {
+					t.Errorf("got %q, want empty", got)
+				}
+				return
+			}
+
+			want := filepath.Join(mailDir, tt.wantDir)
+			if got != want {
+				t.Errorf("got %q, want %q", got, want)
+			}
+		})
 	}
 }

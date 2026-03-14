@@ -54,10 +54,21 @@ Examples:
   # Manual fallback: import a single directory with explicit identifier
   msgvault import-emlx ~/Library/Mail/V10/SOME-GUID --identifier me@gmail.com
   msgvault import-emlx ~/Mail/INBOX.mbox/ --identifier me@gmail.com
+
+  # Legacy two-arg form (deprecated, still works)
+  msgvault import-emlx me@gmail.com ~/Library/Mail/V10/SOME-GUID
 `,
-	Args:         cobra.MaximumNArgs(1),
+	Args:         cobra.MaximumNArgs(2),
 	SilenceUsage: true,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Legacy two-arg form: import-emlx <identifier> <mail-dir>
+		if len(args) == 2 {
+			if importEmlxIdentifier == "" {
+				importEmlxIdentifier = args[0]
+			}
+			args = args[1:]
+		}
+
 		// Determine mail directory.
 		var mailDir string
 		if len(args) > 0 {
