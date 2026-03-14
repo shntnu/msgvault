@@ -383,15 +383,28 @@ func TestFindV10GUIDs(t *testing.T) {
 	}
 }
 
+// writeTestEmlx creates a minimal .emlx file at the given path.
+func writeTestEmlx(t *testing.T, dir, name string) {
+	t.Helper()
+	mustMkdirAll(t, dir)
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("10\nFrom: x\r\n\r\n"), 0o600); err != nil {
+		t.Fatalf("write %q: %v", path, err)
+	}
+}
+
 func TestV10AccountDir_PrefersPopulated(t *testing.T) {
 	guid := "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
 	mailDir := t.TempDir()
 
-	// V10 has the GUID dir but no mailboxes inside.
-	mustMkdirAll(t, filepath.Join(mailDir, "V10", guid))
+	// V10 has the GUID dir with an empty .mbox stub (no .emlx files).
+	mustMkdirAll(t, filepath.Join(mailDir, "V10", guid, "INBOX.mbox", "Messages"))
 
-	// V9 has the GUID dir with actual mailbox content.
-	mustMkdirAll(t, filepath.Join(mailDir, "V9", guid, "INBOX.mbox"))
+	// V9 has actual messages.
+	writeTestEmlx(t,
+		filepath.Join(mailDir, "V9", guid, "INBOX.mbox", "Messages"),
+		"1.emlx",
+	)
 
 	got, err := V10AccountDir(mailDir, guid)
 	if err != nil {
@@ -408,9 +421,15 @@ func TestV10AccountDir_NewestPopulatedWins(t *testing.T) {
 	guid := "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
 	mailDir := t.TempDir()
 
-	// Both have mailboxes; newest wins.
-	mustMkdirAll(t, filepath.Join(mailDir, "V10", guid, "INBOX.mbox"))
-	mustMkdirAll(t, filepath.Join(mailDir, "V9", guid, "INBOX.mbox"))
+	// Both have actual messages; newest wins.
+	writeTestEmlx(t,
+		filepath.Join(mailDir, "V10", guid, "INBOX.mbox", "Messages"),
+		"1.emlx",
+	)
+	writeTestEmlx(t,
+		filepath.Join(mailDir, "V9", guid, "INBOX.mbox", "Messages"),
+		"1.emlx",
+	)
 
 	got, err := V10AccountDir(mailDir, guid)
 	if err != nil {

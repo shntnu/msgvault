@@ -195,7 +195,8 @@ func V10AccountDir(mailDir, guid string) (string, error) {
 		if firstMatch == "" {
 			firstMatch = candidate
 		}
-		if hasMailboxDirs(candidate) {
+		mailboxes, discErr := emlx.DiscoverMailboxes(candidate)
+		if discErr == nil && len(mailboxes) > 0 {
 			return candidate, nil
 		}
 	}
@@ -206,26 +207,6 @@ func V10AccountDir(mailDir, guid string) (string, error) {
 	return "", fmt.Errorf(
 		"no directory found for GUID %s in %s", guid, mailDir,
 	)
-}
-
-// hasMailboxDirs returns true if dir contains at least one .mbox or
-// .imapmbox subdirectory.
-func hasMailboxDirs(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		lower := strings.ToLower(e.Name())
-		if strings.HasSuffix(lower, ".mbox") ||
-			strings.HasSuffix(lower, ".imapmbox") {
-			return true
-		}
-	}
-	return false
 }
 
 // sortedVDirs returns all V* directories in mailDir sorted from
