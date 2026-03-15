@@ -44,6 +44,11 @@ type Manager struct {
 	tokensDir  string
 	logger     *slog.Logger
 	profileURL string // Gmail profile endpoint; overridden in tests
+
+	// browserFlowFn overrides browserFlow in tests to avoid starting
+	// a real HTTP server and browser. When nil, the real browserFlow
+	// is used.
+	browserFlowFn func(ctx context.Context, email string, launchBrowser bool) (*oauth2.Token, error)
 }
 
 // NewManager creates an OAuth manager from client secrets.
@@ -155,7 +160,11 @@ func (m *Manager) AuthorizeManual(ctx context.Context, email string) error {
 func (m *Manager) authorize(
 	ctx context.Context, email string, launchBrowser bool,
 ) error {
-	token, err := m.browserFlow(ctx, email, launchBrowser)
+	flow := m.browserFlow
+	if m.browserFlowFn != nil {
+		flow = m.browserFlowFn
+	}
+	token, err := flow(ctx, email, launchBrowser)
 	if err != nil {
 		return err
 	}
