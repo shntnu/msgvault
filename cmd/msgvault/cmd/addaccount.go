@@ -105,7 +105,7 @@ Examples:
 
 		if err := oauthMgr.Authorize(cmd.Context(), email); err != nil {
 			var mismatch *oauth.TokenMismatchError
-			if errors.As(err, &mismatch) {
+			if errors.As(err, &mismatch) && !forceReauth {
 				return fmt.Errorf(
 					"%w\nIf %s is the primary address, "+
 						"re-add with:\n"+
