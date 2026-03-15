@@ -582,6 +582,66 @@ func TestNewCallbackHandler(t *testing.T) {
 	}
 }
 
+func TestSameGoogleAccount(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		expected  string
+		canonical string
+		want      bool
+	}{
+		{"exact match", "user@gmail.com", "user@gmail.com", true},
+		{"case insensitive", "User@Gmail.Com", "user@gmail.com", true},
+		{"dot insensitive", "first.last@gmail.com", "firstlast@gmail.com", true},
+		{"googlemail alias", "user@googlemail.com", "user@gmail.com", true},
+		{"different users", "alice@gmail.com", "bob@gmail.com", false},
+		{"different domains", "user@example.com", "user@gmail.com", false},
+		{"workspace exact", "user@company.com", "user@company.com", true},
+		{"workspace different", "alice@company.com", "bob@company.com", false},
+		{"gmail vs workspace", "user@gmail.com", "user@company.com", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := sameGoogleAccount(tt.expected, tt.canonical)
+			if got != tt.want {
+				t.Errorf("sameGoogleAccount(%q, %q) = %v, want %v",
+					tt.expected, tt.canonical, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeGmailAddress(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		email string
+		want  string
+	}{
+		{"user@gmail.com", "user@gmail.com"},
+		{"User@Gmail.Com", "user@gmail.com"},
+		{"first.last@gmail.com", "firstlast@gmail.com"},
+		{"user@googlemail.com", "user@gmail.com"},
+		{"f.i.r.s.t@googlemail.com", "first@gmail.com"},
+		{"user@example.com", ""},
+		{"noatsign", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.email, func(t *testing.T) {
+			t.Parallel()
+			got := normalizeGmailAddress(tt.email)
+			if got != tt.want {
+				t.Errorf("normalizeGmailAddress(%q) = %q, want %q",
+					tt.email, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestValidateBrowserURL(t *testing.T) {
 	t.Parallel()
 

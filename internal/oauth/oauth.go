@@ -160,11 +160,21 @@ func (m *Manager) authorize(
 	// Validate the token belongs to the expected account before
 	// persisting it. This prevents token pollution where selecting
 	// the wrong Google account would overwrite a valid token file.
-	if err := m.validateTokenEmail(ctx, email, token); err != nil {
+	canonicalEmail, err := m.resolveTokenEmail(ctx, email, token)
+	if err != nil {
 		return err
 	}
 
-	return m.saveToken(email, token, m.config.Scopes)
+	if err := m.saveToken(canonicalEmail, token, m.config.Scopes); err != nil {
+		return err
+	}
+
+	if canonicalEmail != email {
+		fmt.Printf("Note: Google canonical address is %s "+
+			"(saving token under this address)\n", canonicalEmail)
+	}
+
+	return nil
 }
 
 const (
@@ -256,16 +266,18 @@ func (m *Manager) browserFlow(
 	}
 }
 
-const validateTimeout = 10 * time.Second
+const resolveTimeout = 10 * time.Second
 
-// validateTokenEmail verifies that the OAuth token belongs to the
-// expected email by calling the Gmail profile API. The token is
-// validated before being persisted, so a mismatch or validation
-// failure never overwrites an existing token file.
-func (m *Manager) validateTokenEmail(
+// resolveTokenEmail calls the Gmail profile API to confirm that
+// the token belongs to an account matching the expected email.
+// Returns the canonical (primary) Gmail address for the account,
+// which may differ from the input when the user supplies an alias
+// or secondary login address. The token is never persisted by this
+// function — the caller decides what to do on success or failure.
+func (m *Manager) resolveTokenEmail(
 	ctx context.Context, email string, token *oauth2.Token,
-) error {
-	valCtx, cancel := context.WithTimeout(ctx, validateTimeout)
+) (string, error) {
+	valCtx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 
 	ts := m.config.TokenSource(valCtx, token)
@@ -274,12 +286,12 @@ func (m *Manager) validateTokenEmail(
 	req, err := http.NewRequestWithContext(valCtx, "GET",
 		"https://gmail.googleapis.com/gmail/v1/users/me/profile", nil)
 	if err != nil {
-		return fmt.Errorf("create profile request: %w", err)
+		return "", fmt.Errorf("create profile request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"could not verify token belongs to %s: %w "+
 				"(re-run the command to try again)", email, err)
 	}
@@ -287,7 +299,7 @@ func (m *Manager) validateTokenEmail(
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"could not verify token belongs to %s: "+
 				"Gmail API returned HTTP %d: %s "+
 				"(re-run the command to try again)",
@@ -298,14 +310,18 @@ func (m *Manager) validateTokenEmail(
 		EmailAddress string `json:"emailAddress"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
-		return fmt.Errorf(
+		return "", fmt.Errorf(
 			"could not verify token belongs to %s: "+
 				"failed to parse profile response: %w "+
 				"(re-run the command to try again)", email, err)
 	}
 
-	if !strings.EqualFold(profile.EmailAddress, email) {
-		return fmt.Errorf(
+	// Accept the token if the profile email matches the expected
+	// email (case-insensitive) or shares the same Google domain
+	// (alias). Reject if the emails are for entirely different
+	// accounts.
+	if !sameGoogleAccount(email, profile.EmailAddress) {
+		return "", fmt.Errorf(
 			"token mismatch: expected %s but authorized as %s "+
 				"(wrong account selected during authorization — "+
 				"please try again and select %s)",
@@ -313,7 +329,48 @@ func (m *Manager) validateTokenEmail(
 		)
 	}
 
-	return nil
+	return profile.EmailAddress, nil
+}
+
+// sameGoogleAccount returns true if two email addresses belong to the
+// same Google account. This covers the common alias cases:
+//   - exact match (case-insensitive)
+//   - gmail.com dot-insensitive (first.last@gmail.com == firstlast@gmail.com)
+//   - googlemail.com ↔ gmail.com equivalence
+//
+// For Google Workspace domains we cannot verify aliases without an
+// admin API call, so we fall back to exact-match only.
+func sameGoogleAccount(expected, canonical string) bool {
+	if strings.EqualFold(expected, canonical) {
+		return true
+	}
+
+	// Normalize gmail.com / googlemail.com addresses for comparison
+	expectedNorm := normalizeGmailAddress(expected)
+	canonicalNorm := normalizeGmailAddress(canonical)
+
+	return expectedNorm != "" && expectedNorm == canonicalNorm
+}
+
+// normalizeGmailAddress returns a canonical form of a gmail.com or
+// googlemail.com address by lowercasing, removing dots from the local
+// part, and mapping googlemail.com → gmail.com. Returns "" for
+// non-Gmail addresses.
+func normalizeGmailAddress(email string) string {
+	at := strings.LastIndex(email, "@")
+	if at < 0 {
+		return ""
+	}
+	local := strings.ToLower(email[:at])
+	domain := strings.ToLower(email[at+1:])
+
+	if domain != "gmail.com" && domain != "googlemail.com" {
+		return ""
+	}
+
+	// Gmail ignores dots in the local part
+	local = strings.ReplaceAll(local, ".", "")
+	return local + "@gmail.com"
 }
 
 // tokenFile wraps an OAuth2 token with metadata about the scopes it was

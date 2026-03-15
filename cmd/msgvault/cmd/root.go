@@ -161,7 +161,6 @@ func isAuthInvalidError(err error) bool {
 type tokenReauthorizer interface {
 	TokenSource(ctx context.Context, email string) (oauth2.TokenSource, error)
 	HasToken(email string) bool
-	DeleteToken(email string) error
 	Authorize(ctx context.Context, email string) error
 	AuthorizeManual(ctx context.Context, email string) error
 }
@@ -206,12 +205,10 @@ func getTokenSourceWithReauth(
 
 	fmt.Printf("Token for %s is expired or revoked. Re-authorizing...\n", email)
 
-	if delErr := mgr.DeleteToken(email); delErr != nil {
-		return nil, fmt.Errorf("delete expired token: %w", delErr)
-	}
-
 	// Use manual flow (no browser auto-launch) so the user sees which
 	// account needs authorization and can select the correct one.
+	// AuthorizeManual validates the token and atomically saves it,
+	// so the old token is only overwritten after validation succeeds.
 	if authErr := mgr.AuthorizeManual(ctx, email); authErr != nil {
 		return nil, fmt.Errorf("re-authorize %s: %w", email, authErr)
 	}
