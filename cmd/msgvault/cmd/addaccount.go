@@ -111,7 +111,13 @@ Examples:
 				// already exists (--force re-auth, or token was
 				// manually deleted), the suggestion would create
 				// a duplicate and orphan the existing source.
-				if !hasGmailSource(s, email) {
+				existing, lookupErr := findGmailSource(s, email)
+				if lookupErr != nil {
+					return fmt.Errorf(
+						"authorization failed: %w (also: %v)",
+						err, lookupErr)
+				}
+				if existing == nil {
 					return fmt.Errorf(
 						"%w\nIf %s is the primary address, "+
 							"re-add with:\n"+
@@ -156,11 +162,6 @@ func findGmailSource(
 		}
 	}
 	return nil, nil
-}
-
-func hasGmailSource(s *store.Store, email string) bool {
-	src, _ := findGmailSource(s, email)
-	return src != nil
 }
 
 func init() {

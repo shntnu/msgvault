@@ -6,7 +6,7 @@ import (
 	"github.com/wesm/msgvault/internal/store"
 )
 
-func TestHasGmailSource(t *testing.T) {
+func TestFindGmailSource(t *testing.T) {
 	tmpDir := t.TempDir()
 	s, err := store.Open(tmpDir + "/msgvault.db")
 	if err != nil {
@@ -20,23 +20,38 @@ func TestHasGmailSource(t *testing.T) {
 	const email = "user@company.com"
 
 	// No sources at all — should suggest add-account.
-	if hasGmailSource(s, email) {
-		t.Error("hasGmailSource should be false with no sources")
+	src, err := findGmailSource(s, email)
+	if err != nil {
+		t.Fatalf("findGmailSource error: %v", err)
+	}
+	if src != nil {
+		t.Error("expected nil with no sources")
 	}
 
 	// Non-Gmail source exists — should still suggest add-account.
 	if _, err := s.GetOrCreateSource("mbox", email); err != nil {
 		t.Fatalf("create mbox source: %v", err)
 	}
-	if hasGmailSource(s, email) {
-		t.Error("hasGmailSource should be false with only mbox source")
+	src, err = findGmailSource(s, email)
+	if err != nil {
+		t.Fatalf("findGmailSource error: %v", err)
+	}
+	if src != nil {
+		t.Error("expected nil with only mbox source")
 	}
 
 	// Gmail source exists — should suppress the hint.
 	if _, err := s.GetOrCreateSource("gmail", email); err != nil {
 		t.Fatalf("create gmail source: %v", err)
 	}
-	if !hasGmailSource(s, email) {
-		t.Error("hasGmailSource should be true with gmail source")
+	src, err = findGmailSource(s, email)
+	if err != nil {
+		t.Fatalf("findGmailSource error: %v", err)
+	}
+	if src == nil {
+		t.Fatal("expected non-nil with gmail source")
+	}
+	if src.SourceType != "gmail" {
+		t.Errorf("source type = %q, want gmail", src.SourceType)
 	}
 }
