@@ -143,17 +143,23 @@ Examples:
 	},
 }
 
-func hasGmailSource(s *store.Store, email string) bool {
+func findGmailSource(
+	s *store.Store, email string,
+) *store.Source {
 	sources, err := s.GetSourcesByIdentifier(email)
 	if err != nil {
-		return false
+		return nil
 	}
 	for _, src := range sources {
 		if src.SourceType == "gmail" {
-			return true
+			return src
 		}
 	}
-	return false
+	return nil
+}
+
+func hasGmailSource(s *store.Store, email string) bool {
+	return findGmailSource(s, email) != nil
 }
 
 func init() {

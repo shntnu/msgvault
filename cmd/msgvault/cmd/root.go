@@ -217,7 +217,7 @@ func getTokenSourceWithReauth(
 				"re-authorize %s: %w\n"+
 					"If this account uses an alias, remove "+
 					"and re-add with the primary address:\n"+
-					"  msgvault remove-account %s\n"+
+					"  msgvault remove-account %s --type gmail\n"+
 					"  msgvault add-account %s",
 				email, authErr,
 				mismatch.Expected, mismatch.Actual,
