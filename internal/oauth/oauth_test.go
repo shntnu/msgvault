@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -668,9 +669,19 @@ func TestAuthorize_RejectsMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for mismatched email")
 	}
-	if !strings.Contains(err.Error(), "token mismatch") {
-		t.Errorf("error should contain 'token mismatch': %q",
-			err.Error())
+
+	var mismatch *TokenMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected TokenMismatchError, got %T: %v",
+			err, err)
+	}
+	if mismatch.Expected != "expected@gmail.com" {
+		t.Errorf("Expected = %q, want expected@gmail.com",
+			mismatch.Expected)
+	}
+	if mismatch.Actual != "wrong@gmail.com" {
+		t.Errorf("Actual = %q, want wrong@gmail.com",
+			mismatch.Actual)
 	}
 
 	// No token should have been saved under either address.
@@ -711,9 +722,15 @@ func TestAuthorize_WorkspaceAliasMismatch(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for Workspace alias mismatch")
 	}
-	if !strings.Contains(err.Error(), "token mismatch") {
-		t.Errorf("error should contain 'token mismatch': %q",
-			err.Error())
+
+	var mismatch *TokenMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("expected TokenMismatchError, got %T: %v",
+			err, err)
+	}
+	if mismatch.Actual != "primary@company.com" {
+		t.Errorf("Actual = %q, want primary@company.com",
+			mismatch.Actual)
 	}
 
 	// No token should exist under either address.

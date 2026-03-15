@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -103,6 +104,15 @@ Examples:
 		fmt.Println("Starting browser authorization...")
 
 		if err := oauthMgr.Authorize(cmd.Context(), email); err != nil {
+			var mismatch *oauth.TokenMismatchError
+			if errors.As(err, &mismatch) {
+				return fmt.Errorf(
+					"%w\nIf %s is the primary address, "+
+						"re-add with:\n"+
+						"  msgvault add-account %s",
+					err, mismatch.Actual, mismatch.Actual,
+				)
+			}
 			return fmt.Errorf("authorization failed: %w", err)
 		}
 

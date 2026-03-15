@@ -38,6 +38,21 @@ var ScopesDeletion = []string{
 
 const defaultProfileURL = "https://gmail.googleapis.com/gmail/v1/users/me/profile"
 
+// TokenMismatchError is returned when the authorized Google account
+// does not match the expected email. Callers can inspect Expected
+// and Actual to provide context-appropriate remediation.
+type TokenMismatchError struct {
+	Expected string // email the user asked to authorize
+	Actual   string // email returned by the Gmail profile API
+}
+
+func (e *TokenMismatchError) Error() string {
+	return fmt.Sprintf(
+		"token mismatch: expected %s but authorized as %s",
+		e.Expected, e.Actual,
+	)
+}
+
 // Manager handles OAuth2 token acquisition and storage.
 type Manager struct {
 	config     *oauth2.Config
@@ -324,11 +339,10 @@ func (m *Manager) resolveTokenEmail(
 	}
 
 	if !sameGoogleAccount(email, profile.EmailAddress) {
-		return "", fmt.Errorf(
-			"token mismatch: expected %s but authorized as %s"+
-				" (select the correct account and try again)",
-			email, profile.EmailAddress,
-		)
+		return "", &TokenMismatchError{
+			Expected: email,
+			Actual:   profile.EmailAddress,
+		}
 	}
 
 	return profile.EmailAddress, nil
