@@ -46,6 +46,8 @@ func (o *OAuthConfig) ClientSecretsFor(name string) (string, error)
 - Non-empty name looks up `o.Apps[name]` and returns its `ClientSecrets`.
 - Returns an error with actionable config guidance if the name is not found or the resolved path is empty.
 
+**Path normalization:** The `Load()` function must apply `expandPath` and `resolveRelative` to each `Apps[*].ClientSecrets` entry, same as it does for the top-level `ClientSecrets`. This ensures `~` expansion and relative path resolution work for named apps.
+
 ### Schema Migration
 
 Add a nullable `oauth_app` column to the `sources` table:
@@ -125,6 +127,11 @@ getOAuthMgr := func(appName string) (*oauth.Manager, error) {
 Callers read `source.OAuthApp` (converting `NullString` to `string`, where null becomes `""`) and pass it to `getOAuthMgr`.
 
 **Affected commands:** `sync-full`, `sync`/`sync-incremental`, `serve`, `verify`, `deletions`. All follow the same `getOAuthMgr` pattern today, so the change is mechanical.
+
+**Command-specific notes:**
+
+- **`serve`**: Currently creates a single `oauthMgr` eagerly and passes it into `runScheduledSync`. Must change to pass the cache (or a resolver function) so each scheduled account resolves its own manager. The scheduler receives an email string, so it needs to look up the source's `oauth_app` from the DB.
+- **`deletions`**: Uses `oauth.NewManagerWithScopes` with variable scopes (escalating to full access for `batchDelete`). The lazy cache should not be shared with the standard-scopes cache. Deletions already create their own manager instances per scope set — keep that pattern, just resolve the correct `client_secrets` path via `ClientSecretsFor`.
 
 ### Token Storage
 
