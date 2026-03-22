@@ -23,6 +23,27 @@ client_secrets = "/path/to/personal_secret.json"
 
 Single-app users never see the `[oauth.apps]` section. Their config works unchanged.
 
+**The top-level `client_secrets` is not mandatory.** A config with only named apps and no default is valid:
+
+```toml
+[oauth]
+# no default client_secrets
+
+[oauth.apps.acme]
+client_secrets = "/path/to/acme_secret.json"
+
+[oauth.apps.personal]
+client_secrets = "/path/to/personal_secret.json"
+```
+
+This means the "OAuth not configured" checks in commands (`cfg.OAuth.ClientSecrets == ""`) must change. The check should be: "is there any OAuth config at all?" — i.e., `client_secrets` is set OR `apps` has at least one entry. Per-account resolution then determines which credentials to use:
+
+1. Look up `sources.oauth_app` for the account.
+2. If non-null, resolve via `ClientSecretsFor(name)`.
+3. If null, fall back to `ClientSecrets` (the default). If the default is also empty, return an error telling the user to either set `[oauth].client_secrets` or run `add-account --oauth-app <name>`.
+
+The early "OAuth not configured" guard (`errOAuthNotConfigured()`) must be deferred until per-account resolution, not checked eagerly at command start. Commands that loop over all accounts should skip Gmail accounts that have no resolvable OAuth config rather than failing the entire command.
+
 **Go structs:**
 
 ```go
@@ -42,9 +63,17 @@ A helper method resolves the correct path:
 func (o *OAuthConfig) ClientSecretsFor(name string) (string, error)
 ```
 
-- Empty name returns `o.ClientSecrets` (the default).
-- Non-empty name looks up `o.Apps[name]` and returns its `ClientSecrets`.
-- Returns an error with actionable config guidance if the name is not found or the resolved path is empty.
+- Empty name returns `o.ClientSecrets` (the default). Returns an error if the default is empty.
+- Non-empty name looks up `o.Apps[name]` and returns its `ClientSecrets`. Returns an error if the name is not found or its path is empty.
+- All errors include actionable config guidance.
+
+A second helper checks whether any OAuth config exists at all:
+
+```go
+func (o *OAuthConfig) HasAnyConfig() bool
+```
+
+Returns true if `ClientSecrets` is non-empty OR `Apps` has at least one entry with a non-empty `ClientSecrets`. Used to replace the current `cfg.OAuth.ClientSecrets == ""` guards.
 
 **Path normalization:** The `Load()` function must apply `expandPath` and `resolveRelative` to each `Apps[*].ClientSecrets` entry, same as it does for the top-level `ClientSecrets`. This ensures `~` expansion and relative path resolution work for named apps.
 
@@ -86,10 +115,21 @@ msgvault add-account you@acme.com --oauth-app acme
 
 1. If `--oauth-app` is set, validate the named app exists in config. Use its `client_secrets` to create the `oauth.Manager`. Persist the name to `sources.oauth_app`.
 2. If `--oauth-app` is omitted, use the top-level `[oauth].client_secrets` as today. Store `NULL` in `sources.oauth_app`.
-3. If the account already exists and `--oauth-app` is provided, update `sources.oauth_app`. If the new app has different client credentials, the existing token won't refresh against the new client ID, so detect this and prompt for re-auth.
-4. If `--force` re-auth is used on an existing account, look up the existing `oauth_app` binding from the DB so the user doesn't need to re-specify it.
+3. If `--force` re-auth is used on an existing account, look up the existing `oauth_app` binding from the DB so the user doesn't need to re-specify it. If `--oauth-app` is also provided, it overrides the stored binding.
 
-**Migration path for existing users** switching from single to multiple apps: run `add-account you@acme.com --oauth-app acme` on existing accounts. This updates the binding and re-auths if needed.
+**Changing an account's OAuth app binding:**
+
+When `add-account` is run on an existing account with `--oauth-app`, and the new value differs from the stored `sources.oauth_app`:
+
+1. Update `sources.oauth_app` to the new value.
+2. Delete the existing token (`oauthMgr.DeleteToken`).
+3. Run the full authorization flow with the new app's credentials.
+
+This is necessary because the current token file has no client identity metadata — there is no way to verify whether an existing token was minted by the same OAuth client. A token minted by one client will fail to refresh against a different client's credentials. Rather than adding client metadata to the token file for a rare migration operation, we simply re-auth. The user experience is: "Switching OAuth app for you@acme.com. Re-authorizing..."
+
+The `HasToken` short-circuit in `add-account` must be restructured: check for an oauth_app binding change **before** checking `HasToken`, so that a binding change triggers re-auth even when a token exists.
+
+**Migration path for existing users** switching from single to multiple apps: run `add-account you@acme.com --oauth-app acme` on existing accounts. This detects the binding change (NULL to "acme"), deletes the old token, and re-authorizes with the new app's credentials.
 
 **Error message** when a named app isn't found:
 
@@ -130,7 +170,7 @@ Callers read `source.OAuthApp` (converting `NullString` to `string`, where null 
 
 **Command-specific notes:**
 
-- **`serve`**: Currently creates a single `oauthMgr` eagerly and passes it into `runScheduledSync`. Must change to pass the cache (or a resolver function) so each scheduled account resolves its own manager. The scheduler receives an email string, so it needs to look up the source's `oauth_app` from the DB.
+- **`serve`**: Currently creates a single `oauthMgr` eagerly and passes it into `runScheduledSync`. Must change to pass the cache (or a resolver function) so each scheduled account resolves its own manager. The scheduler receives an email string, so it needs to look up the source's `oauth_app` from the DB. **Fallback for missing source rows:** `serve` currently supports scheduled accounts that don't yet have a `sources` row (token uploaded first, account registered lazily via `GetOrCreateSource` during sync). When no source row exists, the resolver must fall back to the default OAuth app (`[oauth].client_secrets`). If no default is configured either, skip the account with a warning. This preserves the existing "upload token first" workflow while giving named-app users the correct resolution path once their accounts are registered.
 - **`deletions`**: Uses `oauth.NewManagerWithScopes` with variable scopes (escalating to full access for `batchDelete`). The lazy cache should not be shared with the standard-scopes cache. Deletions already create their own manager instances per scope set — keep that pattern, just resolve the correct `client_secrets` path via `ClientSecretsFor`.
 
 ### Token Storage
@@ -164,6 +204,6 @@ If a user re-auths an account with a different OAuth app, the new token overwrit
 
 - Domain-based auto-routing (accounts explicitly bind via `--oauth-app`)
 - Changes to `add-imap` (IMAP uses its own credential storage)
-- Changes to token file format
+- Client identity in token files (binding changes trigger re-auth instead)
 - Setup wizard changes (multi-app is an advanced path)
 - Per-app scopes (all apps use the same Gmail scopes)
