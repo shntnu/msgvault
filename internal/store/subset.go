@@ -241,7 +241,14 @@ func copyData(tx *sql.Tx, rowCount int) (*CopyResult, error) {
 	}
 
 	res, err := tx.Exec(`
-		INSERT INTO sources SELECT * FROM src.sources
+		INSERT INTO sources
+			(id, source_type, identifier, display_name, google_user_id,
+			 last_sync_at, sync_cursor, sync_config, oauth_app,
+			 created_at, updated_at)
+		SELECT id, source_type, identifier, display_name, google_user_id,
+		       last_sync_at, sync_cursor, sync_config, oauth_app,
+		       created_at, updated_at
+		FROM src.sources
 		WHERE id IN (
 			SELECT DISTINCT source_id FROM src.messages
 			WHERE id IN (SELECT id FROM selected_messages)

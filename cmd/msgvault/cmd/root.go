@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/cobra"
 	"github.com/wesm/msgvault/internal/config"
@@ -91,7 +92,8 @@ To use msgvault, you need a Google Cloud OAuth credential:
        [oauth]
        client_secrets = "/path/to/client_secret.json"`, configPath)
 	if cfg != nil && len(cfg.OAuth.Apps) > 0 {
-		hint += "\n\nNamed OAuth apps are configured. Use --oauth-app <name> to specify one."
+		hint += "\n\nNamed OAuth apps are configured. " +
+			"Use 'add-account <email> --oauth-app <name>' to bind an account."
 	}
 	return hint
 }
@@ -241,10 +243,14 @@ func getTokenSourceWithReauth(
 }
 
 // oauthManagerCache returns a resolver function that lazily creates and
-// caches oauth.Manager instances keyed by app name.
+// caches oauth.Manager instances keyed by app name. The cache is safe
+// for concurrent use (serve runs scheduled syncs in goroutines).
 func oauthManagerCache() func(appName string) (*oauth.Manager, error) {
+	var mu sync.Mutex
 	managers := map[string]*oauth.Manager{}
 	return func(appName string) (*oauth.Manager, error) {
+		mu.Lock()
+		defer mu.Unlock()
 		if mgr, ok := managers[appName]; ok {
 			return mgr, nil
 		}

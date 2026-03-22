@@ -53,6 +53,7 @@ Examples:
 
 		// Resolve which client secrets to use
 		resolvedApp := oauthAppName
+		oauthAppExplicit := cmd.Flags().Changed("oauth-app")
 		var clientSecretsPath string
 
 		// Initialize database (in case it's new)
@@ -73,14 +74,17 @@ Examples:
 			return fmt.Errorf("look up existing source: %w", err)
 		}
 
-		// For --force without --oauth-app, inherit existing binding
-		if forceReauth && resolvedApp == "" && existingSource != nil && existingSource.OAuthApp.Valid {
+		// Inherit stored binding when --oauth-app is not specified.
+		// This ensures re-running add-account on a named-app account
+		// (e.g., after token loss) uses the correct credentials.
+		if !oauthAppExplicit && existingSource != nil && existingSource.OAuthApp.Valid {
 			resolvedApp = existingSource.OAuthApp.String
 		}
 
-		// Detect binding change
+		// Detect binding change: --oauth-app was explicitly set and
+		// differs from the stored value (including clearing to default).
 		bindingChanged := false
-		if existingSource != nil && oauthAppName != "" {
+		if oauthAppExplicit && existingSource != nil {
 			currentApp := ""
 			if existingSource.OAuthApp.Valid {
 				currentApp = existingSource.OAuthApp.String
@@ -105,23 +109,8 @@ Examples:
 			return wrapOAuthError(fmt.Errorf("create oauth manager: %w", err))
 		}
 
-		// Handle binding change: delete old token and re-auth
-		if bindingChanged {
-			fmt.Printf("Switching OAuth app for %s to %q. Re-authorizing...\n", email, oauthAppName)
-			if oauthMgr.HasToken(email) {
-				if err := oauthMgr.DeleteToken(email); err != nil {
-					return fmt.Errorf("delete existing token: %w", err)
-				}
-			}
-			// Update binding in DB
-			newApp := sql.NullString{String: oauthAppName, Valid: true}
-			if err := s.UpdateSourceOAuthApp(existingSource.ID, newApp); err != nil {
-				return fmt.Errorf("update oauth app binding: %w", err)
-			}
-		}
-
 		// If --force, delete existing token so we re-authorize
-		if forceReauth && !bindingChanged {
+		if forceReauth {
 			if oauthMgr.HasToken(email) {
 				fmt.Printf("Removing existing token for %s...\n", email)
 				if err := oauthMgr.DeleteToken(email); err != nil {
@@ -132,15 +121,24 @@ Examples:
 			}
 		}
 
-		// Check if already authorized (skip if binding just changed)
-		if !bindingChanged && oauthMgr.HasToken(email) {
+		// For binding changes, delete the old token so we re-auth
+		// with the new app's credentials.
+		if bindingChanged && oauthMgr.HasToken(email) {
+			fmt.Printf("Switching OAuth app for %s to %q. Re-authorizing...\n", email, oauthAppName)
+			if err := oauthMgr.DeleteToken(email); err != nil {
+				return fmt.Errorf("delete existing token: %w", err)
+			}
+		}
+
+		// Check if already authorized (skip if binding changed or --force)
+		if !bindingChanged && !forceReauth && oauthMgr.HasToken(email) {
 			source, err := s.GetOrCreateSource("gmail", email)
 			if err != nil {
 				return fmt.Errorf("create source: %w", err)
 			}
 			// Set oauth_app on new source if specified
-			if oauthAppName != "" && !source.OAuthApp.Valid {
-				newApp := sql.NullString{String: oauthAppName, Valid: true}
+			if resolvedApp != "" && !source.OAuthApp.Valid {
+				newApp := sql.NullString{String: resolvedApp, Valid: true}
 				if err := s.UpdateSourceOAuthApp(source.ID, newApp); err != nil {
 					return fmt.Errorf("update oauth app binding: %w", err)
 				}
@@ -156,7 +154,11 @@ Examples:
 		}
 
 		// Perform authorization
-		fmt.Println("Starting browser authorization...")
+		if bindingChanged {
+			fmt.Printf("Switching OAuth app for %s to %q. Authorizing...\n", email, oauthAppName)
+		} else {
+			fmt.Println("Starting browser authorization...")
+		}
 
 		if err := oauthMgr.Authorize(cmd.Context(), email); err != nil {
 			var mismatch *oauth.TokenMismatchError
@@ -176,17 +178,22 @@ Examples:
 			return fmt.Errorf("authorization failed: %w", err)
 		}
 
-		// Create source record in database
+		// Authorization succeeded — now persist the binding and source.
 		source, err := s.GetOrCreateSource("gmail", email)
 		if err != nil {
 			return fmt.Errorf("create source: %w", err)
 		}
 
-		// Set oauth_app binding
-		if oauthAppName != "" {
-			newApp := sql.NullString{String: oauthAppName, Valid: true}
+		// Update oauth_app binding (set or clear)
+		if resolvedApp != "" {
+			newApp := sql.NullString{String: resolvedApp, Valid: true}
 			if err := s.UpdateSourceOAuthApp(source.ID, newApp); err != nil {
 				return fmt.Errorf("update oauth app binding: %w", err)
+			}
+		} else if bindingChanged {
+			// Clearing the binding (switching back to default)
+			if err := s.UpdateSourceOAuthApp(source.ID, sql.NullString{}); err != nil {
+				return fmt.Errorf("clear oauth app binding: %w", err)
 			}
 		}
 

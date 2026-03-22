@@ -360,7 +360,11 @@ Examples:
 
 		// Resolve OAuth credentials for this account
 		appName := ""
-		if src, _ := findGmailSource(s, account); src != nil {
+		src, srcErr := findGmailSource(s, account)
+		if srcErr != nil {
+			return fmt.Errorf("look up source for %s: %w", account, srcErr)
+		}
+		if src != nil {
 			appName = sourceOAuthApp(src)
 		}
 		clientSecretsPath, err := cfg.OAuth.ClientSecretsFor(appName)

@@ -46,7 +46,11 @@ Examples:
 
 		// Look up source to get OAuth app binding
 		appName := ""
-		if src, _ := findGmailSource(s, email); src != nil {
+		src, srcErr := findGmailSource(s, email)
+		if srcErr != nil {
+			return fmt.Errorf("look up source for %s: %w", email, srcErr)
+		}
+		if src != nil {
 			appName = sourceOAuthApp(src)
 		}
 
