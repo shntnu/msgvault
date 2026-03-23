@@ -66,8 +66,9 @@ Use --starttls for STARTTLS upgrade on port 143.
 Use --no-tls for a plain unencrypted connection (not recommended).
 
 You will be prompted to enter your password interactively.
-You can also pipe a password via stdin for scripting:
-  echo "password" | msgvault add-imap --host ... --username ...
+For scripting, pipe the password via stdin to avoid exposing it in
+shell history or process listings:
+  read -s PASS && echo "$PASS" | msgvault add-imap --host ... --username ...
 
 Security note: Your password is stored on disk with restricted file
 permissions (0600). For stronger security, use an app-specific password
