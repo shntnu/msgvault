@@ -36,6 +36,7 @@ var Scopes = []string{
 	"offline_access",
 	"openid",
 	"email",
+	"User.Read", // required for MS Graph /me to validate email
 }
 
 type TokenMismatchError struct {
