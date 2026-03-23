@@ -50,7 +50,7 @@ Examples:
 		// non-fatal since headless only prints instructions.
 		if headless {
 			app := oauthAppName
-			if app == "" {
+			if !cmd.Flags().Changed("oauth-app") {
 				if s, openErr := store.Open(cfg.DatabaseDSN()); openErr == nil {
 					defer func() { _ = s.Close() }()
 					if initErr := s.InitSchema(); initErr == nil {
