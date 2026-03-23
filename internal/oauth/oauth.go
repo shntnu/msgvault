@@ -231,6 +231,12 @@ func (m *Manager) newCallbackHandler(expectedState string, codeChan chan<- strin
 func (m *Manager) browserFlow(
 	ctx context.Context, email string, launchBrowser bool,
 ) (*oauth2.Token, error) {
+	// Bail early if context is already cancelled — no point starting
+	// a server or opening a browser.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// Generate random state for CSRF protection
 	stateBytes := make([]byte, 16)
 	if _, err := rand.Read(stateBytes); err != nil {

@@ -1,8 +1,16 @@
 package cmd
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/spf13/cobra"
+	"github.com/wesm/msgvault/internal/config"
 	"github.com/wesm/msgvault/internal/store"
 )
 
@@ -53,5 +61,131 @@ func TestFindGmailSource(t *testing.T) {
 	}
 	if src.SourceType != "gmail" {
 		t.Errorf("source type = %q, want gmail", src.SourceType)
+	}
+}
+
+// TestAddAccount_RebindPreservesTokenOnFailure verifies that when
+// switching OAuth app binding fails (auth cancelled/failed), the
+// original token file and DB binding remain intact.
+func TestAddAccount_RebindPreservesTokenOnFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "msgvault.db")
+
+	// Set up DB with a source bound to "old-app"
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	if err := s.InitSchema(); err != nil {
+		t.Fatalf("init schema: %v", err)
+	}
+	source, err := s.GetOrCreateSource("gmail", "user@acme.com")
+	if err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	err = s.UpdateSourceOAuthApp(source.ID, sql.NullString{
+		String: "old-app", Valid: true,
+	})
+	if err != nil {
+		t.Fatalf("set oauth_app: %v", err)
+	}
+	_ = s.Close()
+
+	// Write a fake token file
+	tokensDir := filepath.Join(tmpDir, "tokens")
+	if err := os.MkdirAll(tokensDir, 0700); err != nil {
+		t.Fatalf("mkdir tokens: %v", err)
+	}
+	tokenData, _ := json.Marshal(map[string]string{
+		"access_token":  "fake-access",
+		"refresh_token": "fake-refresh",
+		"token_type":    "Bearer",
+	})
+	tokenPath := filepath.Join(tokensDir, "user@acme.com.json")
+	if err := os.WriteFile(tokenPath, tokenData, 0600); err != nil {
+		t.Fatalf("write token: %v", err)
+	}
+
+	// Write fake client secrets for both apps
+	secretsPath := filepath.Join(tmpDir, "secret.json")
+	if err := os.WriteFile(
+		secretsPath, []byte(fakeClientSecrets), 0600,
+	); err != nil {
+		t.Fatalf("write secrets: %v", err)
+	}
+
+	// Save/restore globals
+	savedCfg := cfg
+	savedLogger := logger
+	savedOAuthApp := oauthAppName
+	defer func() {
+		cfg = savedCfg
+		logger = savedLogger
+		oauthAppName = savedOAuthApp
+	}()
+
+	cfg = &config.Config{
+		HomeDir: tmpDir,
+		Data:    config.DataConfig{DataDir: tmpDir},
+		OAuth: config.OAuthConfig{
+			Apps: map[string]config.OAuthApp{
+				"old-app": {ClientSecrets: secretsPath},
+				"new-app": {ClientSecrets: secretsPath},
+			},
+		},
+	}
+	logger = slog.New(slog.NewTextHandler(os.Stderr, nil))
+
+	// Use a pre-cancelled context so Authorize fails immediately
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Build a command with --oauth-app flag set
+	testCmd := &cobra.Command{
+		Use:  "add-account <email>",
+		Args: cobra.ExactArgs(1),
+		RunE: addAccountCmd.RunE,
+	}
+	testCmd.Flags().StringVar(&oauthAppName, "oauth-app", "", "")
+	testCmd.Flags().BoolVar(&headless, "headless", false, "")
+	testCmd.Flags().BoolVar(&forceReauth, "force", false, "")
+	testCmd.Flags().StringVar(&accountDisplayName, "display-name", "", "")
+
+	root := newTestRootCmd()
+	root.AddCommand(testCmd)
+	root.SetArgs([]string{
+		"add-account", "user@acme.com", "--oauth-app", "new-app",
+	})
+
+	err = root.ExecuteContext(ctx)
+	if err == nil {
+		t.Fatal("expected error from cancelled auth")
+	}
+
+	// Verify token file still exists
+	if _, statErr := os.Stat(tokenPath); os.IsNotExist(statErr) {
+		t.Error("token file was deleted despite auth failure")
+	}
+
+	// Verify DB binding is still "old-app"
+	s2, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer func() { _ = s2.Close() }()
+
+	src, err := findGmailSource(s2, "user@acme.com")
+	if err != nil {
+		t.Fatalf("find source: %v", err)
+	}
+	if src == nil {
+		t.Fatal("source not found after failed rebind")
+	}
+	if !src.OAuthApp.Valid || src.OAuthApp.String != "old-app" {
+		t.Errorf(
+			"oauth_app = %v, want old-app "+
+				"(binding should not change on auth failure)",
+			src.OAuthApp,
+		)
 	}
 }
