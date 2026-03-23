@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/wesm/msgvault/internal/gmail"
 	imaplib "github.com/wesm/msgvault/internal/imap"
+	"github.com/wesm/msgvault/internal/microsoft"
 	"github.com/wesm/msgvault/internal/oauth"
 	"github.com/wesm/msgvault/internal/store"
 	"github.com/wesm/msgvault/internal/sync"
@@ -145,8 +146,21 @@ Examples:
 					}
 					gmailTargets = append(gmailTargets, syncTarget{source: src, email: src.Identifier})
 				case "imap":
-					if !imaplib.HasCredentials(cfg.TokensDir(), src.Identifier) {
-						fmt.Printf("Skipping %s (no credentials - run 'add-imap' first)\n", src.Identifier)
+					hasAuth := imaplib.HasCredentials(cfg.TokensDir(), src.Identifier)
+					if !hasAuth && src.SyncConfig.Valid {
+						imapCfg, parseErr := imaplib.ConfigFromJSON(src.SyncConfig.String)
+						if parseErr == nil && imapCfg.EffectiveAuthMethod() == imaplib.AuthXOAuth2 {
+							msMgr := microsoft.NewManager(
+								cfg.Microsoft.ClientID,
+								cfg.Microsoft.EffectiveTenantID(),
+								cfg.TokensDir(),
+								logger,
+							)
+							hasAuth = msMgr.HasToken(imapCfg.Username)
+						}
+					}
+					if !hasAuth {
+						fmt.Printf("Skipping %s (no credentials - run 'add-imap' or 'add-o365' first)\n", src.Identifier)
 						continue
 					}
 					imapTargets = append(imapTargets, src)
