@@ -45,12 +45,6 @@ Examples:
 			return fmt.Errorf("--headless and --force cannot be used together: --force requires browser-based OAuth which is not available in headless mode")
 		}
 
-		// For --headless, just show instructions (no OAuth config needed)
-		if headless {
-			oauth.PrintHeadlessInstructions(email, cfg.TokensDir(), oauthAppName)
-			return nil
-		}
-
 		// Resolve which client secrets to use
 		resolvedApp := oauthAppName
 		oauthAppExplicit := cmd.Flags().Changed("oauth-app")
@@ -76,9 +70,16 @@ Examples:
 
 		// Inherit stored binding when --oauth-app is not specified.
 		// This ensures re-running add-account on a named-app account
-		// (e.g., after token loss) uses the correct credentials.
+		// (e.g., after token loss or --headless) uses the correct credentials.
 		if !oauthAppExplicit && existingSource != nil && existingSource.OAuthApp.Valid {
 			resolvedApp = existingSource.OAuthApp.String
+		}
+
+		// For --headless, show instructions with the resolved app name
+		// (inherited from DB if not explicitly provided).
+		if headless {
+			oauth.PrintHeadlessInstructions(email, cfg.TokensDir(), resolvedApp)
+			return nil
 		}
 
 		// Detect binding change: --oauth-app was explicitly set and
