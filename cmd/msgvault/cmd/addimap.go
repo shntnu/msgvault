@@ -1,14 +1,52 @@
 package cmd
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
+	"github.com/charmbracelet/huh"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 	imapclient "github.com/wesm/msgvault/internal/imap"
 	"github.com/wesm/msgvault/internal/store"
-	"golang.org/x/term"
 )
+
+// passwordMethod describes how to read the password.
+type passwordMethod int
+
+const (
+	// passwordInteractive uses huh masked input with asterisk echo.
+	passwordInteractive passwordMethod = iota
+	// passwordNoPrompt means stdin is a TTY but no output TTY is
+	// available for the prompt. Fail with a clear error.
+	passwordNoPrompt
+	// passwordPipe reads from piped (non-terminal) stdin.
+	passwordPipe
+)
+
+// choosePasswordStrategy selects the password input method based on
+// which file descriptors are terminals. Returns the method and, for
+// passwordInteractive, the output file to render the TUI to.
+func choosePasswordStrategy(
+	stdinNative, stdinCygwin, stderrTTY, stdoutTTY bool,
+) (passwordMethod, *os.File) {
+	stdinTTY := stdinNative || stdinCygwin
+	if !stdinTTY {
+		return passwordPipe, nil
+	}
+	// Prefer stderr (keeps stdout clean); fall back to stdout.
+	switch {
+	case stderrTTY:
+		return passwordInteractive, os.Stderr
+	case stdoutTTY:
+		return passwordInteractive, os.Stdout
+	default:
+		return passwordNoPrompt, nil
+	}
+}
 
 var (
 	imapHost     string
@@ -28,6 +66,9 @@ Use --starttls for STARTTLS upgrade on port 143.
 Use --no-tls for a plain unencrypted connection (not recommended).
 
 You will be prompted to enter your password interactively.
+For scripting, pipe the password via stdin to avoid exposing it in
+shell history or process listings:
+  read -s PASS && echo "$PASS" | msgvault add-imap --host ... --username ...
 
 Security note: Your password is stored on disk with restricted file
 permissions (0600). For stronger security, use an app-specific password
@@ -58,17 +99,28 @@ Examples:
 			Username: imapUsername,
 		}
 
-		// Get password via secure interactive prompt only (never via flag to
-		// avoid exposure in shell history and process listings).
-		fmt.Printf("Password for %s@%s: ", imapUsername, imapHost)
-		raw, err := term.ReadPassword(int(os.Stdin.Fd()))
-		fmt.Println()
-		if err != nil {
-			return fmt.Errorf("read password: %w", err)
+		prompt := fmt.Sprintf("Password for %s@%s:", imapUsername, imapHost)
+		method, promptOut := choosePasswordStrategy(
+			isatty.IsTerminal(os.Stdin.Fd()),
+			isatty.IsCygwinTerminal(os.Stdin.Fd()),
+			isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd()),
+			isatty.IsTerminal(os.Stdout.Fd()) || isatty.IsCygwinTerminal(os.Stdout.Fd()),
+		)
+
+		var (
+			password string
+			err      error
+		)
+		switch method {
+		case passwordInteractive:
+			password, err = readPasswordInteractive(prompt, promptOut)
+		case passwordNoPrompt:
+			return fmt.Errorf("cannot read password: no terminal available for prompt (try piping the password via stdin)")
+		case passwordPipe:
+			password, err = readPasswordFromPipe(os.Stdin)
 		}
-		password := string(raw)
-		if password == "" {
-			return fmt.Errorf("password is required")
+		if err != nil {
+			return err
 		}
 
 		// Test connection
@@ -129,6 +181,44 @@ Examples:
 
 		return nil
 	},
+}
+
+// readPasswordFromPipe reads a password from a non-terminal reader
+// (e.g. piped stdin). Uses only the first line.
+func readPasswordFromPipe(r io.Reader) (string, error) {
+	scanner := bufio.NewScanner(r)
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("read password: %w", err)
+		}
+		return "", fmt.Errorf("password is required")
+	}
+	password := strings.TrimRight(scanner.Text(), "\r\n")
+	if strings.TrimSpace(password) == "" {
+		return "", fmt.Errorf("password is required")
+	}
+	return password, nil
+}
+
+// readPasswordInteractive prompts for a password using a masked
+// input field with asterisk echo. The output writer controls where
+// the TUI renders (typically stderr to avoid polluting stdout).
+func readPasswordInteractive(prompt string, output io.Writer) (string, error) {
+	var password string
+	input := huh.NewInput().
+		Title(prompt).
+		EchoMode(huh.EchoModePassword).
+		Value(&password)
+	err := huh.NewForm(huh.NewGroup(input)).
+		WithOutput(output).
+		Run()
+	if err != nil {
+		return "", fmt.Errorf("read password: %w", err)
+	}
+	if strings.TrimSpace(password) == "" {
+		return "", fmt.Errorf("password is required")
+	}
+	return password, nil
 }
 
 func init() {
