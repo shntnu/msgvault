@@ -64,7 +64,7 @@ func (s *Store) ListMessages(offset, limit int) ([]APIMessage, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Use scanMessageRows for robust date parsing
 	messages, ids, err := scanMessageRows(rows)
@@ -161,7 +161,7 @@ func (s *Store) GetMessage(id int64) (*APIMessage, error) {
 	// Get attachments
 	attRows, err := s.db.Query("SELECT filename, mime_type, size FROM attachments WHERE message_id = ?", id)
 	if err == nil {
-		defer attRows.Close()
+		defer func() { _ = attRows.Close() }()
 		for attRows.Next() {
 			var att APIAttachment
 			if err := attRows.Scan(&att.Filename, &att.MimeType, &att.Size); err == nil {
@@ -202,7 +202,7 @@ func (s *Store) SearchMessages(query string, offset, limit int) ([]APIMessage, i
 		// FTS5 might not be available, fall back to LIKE search
 		return s.searchMessagesLike(query, offset, limit)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	messages, ids, err := scanMessageRows(rows)
 	if err != nil {
@@ -279,7 +279,7 @@ func (s *Store) searchMessagesLike(query string, offset, limit int) ([]APIMessag
 	if err != nil {
 		return nil, 0, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	messages, ids, err := scanMessageRows(rows)
 	if err != nil {
@@ -389,7 +389,7 @@ func (s *Store) batchGetRecipients(messageIDs []int64, recipientType string) (ma
 	if err != nil {
 		return nil, fmt.Errorf("batch get recipients: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[int64][]string, len(messageIDs))
 	for rows.Next() {
@@ -432,7 +432,7 @@ func (s *Store) batchGetLabels(messageIDs []int64) (map[int64][]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("batch get labels: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[int64][]string, len(messageIDs))
 	for rows.Next() {
@@ -462,7 +462,7 @@ func (s *Store) getRecipients(messageID int64, recipientType string) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("get recipients: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var recipients []string
 	for rows.Next() {
@@ -491,7 +491,7 @@ func (s *Store) getLabels(messageID int64) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get labels: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var labels []string
 	for rows.Next() {

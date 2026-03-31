@@ -593,7 +593,7 @@ func TestMkTempDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MkTempDir failed: %v", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("temp dir does not exist: %v", err)
@@ -607,7 +607,7 @@ func TestMkTempDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MkTempDir failed: %v", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		if !strings.HasPrefix(dir, preferred) {
 			t.Errorf("temp dir %q not under preferred %q", dir, preferred)
@@ -620,7 +620,7 @@ func TestMkTempDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MkTempDir failed: %v", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		// Should have used system temp, not errored
 		if _, err := os.Stat(dir); err != nil {
@@ -633,7 +633,7 @@ func TestMkTempDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MkTempDir failed: %v", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		// Should have fallen back to system temp
 		if strings.Contains(dir, "nonexistent") {
@@ -657,7 +657,7 @@ func TestMkTempDir(t *testing.T) {
 		// configurations can still write to 0500 directories).
 		probe, probeErr := os.MkdirTemp(restrictedTmp, "probe-*")
 		if probeErr == nil {
-			os.Remove(probe)
+			_ = os.Remove(probe)
 			t.Skip("chmod 0500 did not restrict writes (running as root or permissive ACLs)")
 		}
 
@@ -670,7 +670,7 @@ func TestMkTempDir(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MkTempDir failed: %v", err)
 		}
-		defer os.RemoveAll(dir)
+		defer func() { _ = os.RemoveAll(dir) }()
 
 		expectedBase := filepath.Join(msgvaultHome, "tmp")
 		if !strings.HasPrefix(dir, expectedBase) {
@@ -1070,8 +1070,8 @@ func TestSave_FailurePreservesExisting(t *testing.T) {
 	// Probe whether the restriction actually works
 	probe, probeErr := os.CreateTemp(tmpDir, "probe-*")
 	if probeErr == nil {
-		probe.Close()
-		os.Remove(probe.Name())
+		_ = probe.Close()
+		_ = os.Remove(probe.Name())
 		t.Skip("chmod 0500 did not restrict writes (running as root)")
 	}
 

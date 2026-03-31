@@ -177,7 +177,7 @@ func buildCache(dbPath, analyticsDir string, fullRebuild bool) (*buildResult, er
 	if err != nil {
 		return nil, fmt.Errorf("open duckdb: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Set up sqlite_db tables — either via DuckDB's sqlite extension (Linux/macOS)
 	// or via CSV intermediate files (Windows, where sqlite_scanner is unavailable).
@@ -511,7 +511,7 @@ var cacheStatsCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("open duckdb: %w", err)
 		}
-		defer db.Close()
+		defer func() { _ = db.Close() }()
 
 		// Query stats by joining Parquet files
 		escapedDir := strings.ReplaceAll(analyticsDir, "'", "''")
@@ -625,7 +625,7 @@ func setupSQLiteSource(duckDB *sql.DB, dbPath string) (cleanup func(), err error
 
 	sqliteDB, err := sql.Open("sqlite3", dbPath+"?mode=ro")
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("open sqlite for CSV export: %w", err)
 	}
 
@@ -650,17 +650,17 @@ func setupSQLiteSource(duckDB *sql.DB, dbPath string) (cleanup func(), err error
 	for _, t := range tables {
 		csvPath := filepath.Join(tmpDir, t.name+".csv")
 		if err := exportToCSV(sqliteDB, t.query, csvPath); err != nil {
-			sqliteDB.Close()
-			os.RemoveAll(tmpDir)
+			_ = sqliteDB.Close()
+			_ = os.RemoveAll(tmpDir)
 			return nil, fmt.Errorf("export %s to CSV: %w", t.name, err)
 		}
 	}
-	sqliteDB.Close()
+	_ = sqliteDB.Close()
 
 	// Create sqlite_db schema with views pointing to CSV files.
 	// This lets the existing COPY queries reference sqlite_db.tablename unchanged.
 	if _, err := duckDB.Exec("CREATE SCHEMA sqlite_db"); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		return nil, fmt.Errorf("create sqlite_db schema: %w", err)
 	}
 	for _, t := range tables {
@@ -677,12 +677,12 @@ func setupSQLiteSource(duckDB *sql.DB, dbPath string) (cleanup func(), err error
 			t.name, escaped, csvOpts,
 		)
 		if _, err := duckDB.Exec(viewSQL); err != nil {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 			return nil, fmt.Errorf("create view sqlite_db.%s: %w", t.name, err)
 		}
 	}
 
-	return func() { os.RemoveAll(tmpDir) }, nil
+	return func() { _ = os.RemoveAll(tmpDir) }, nil
 }
 
 // csvNullStr is written for NULL values in CSV exports so DuckDB can
@@ -696,13 +696,13 @@ func exportToCSV(db *sql.DB, query string, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	f, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	w := csv.NewWriter(f)
 

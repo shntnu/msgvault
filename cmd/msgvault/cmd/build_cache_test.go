@@ -26,10 +26,10 @@ func setupTestSQLite(t *testing.T) (string, func()) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Create schema
 	schema := `
@@ -102,7 +102,7 @@ func setupTestSQLite(t *testing.T) (string, func()) {
 	`
 
 	if _, err := db.Exec(schema); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("create schema: %v", err)
 	}
 
@@ -179,12 +179,12 @@ func setupTestSQLite(t *testing.T) (string, func()) {
 	`
 
 	if _, err := db.Exec(testData); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("insert test data: %v", err)
 	}
 
 	cleanup := func() {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 	}
 
 	return tmpDir, cleanup
@@ -264,7 +264,7 @@ func TestBuildCache_DataIntegrity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Helper to count rows in a Parquet file
 	countRows := func(pattern string) int64 {
@@ -370,7 +370,7 @@ func TestBuildCache_IncrementalExport(t *testing.T) {
 		INSERT INTO attachments (message_id, filename, mime_type, size) VALUES
 			(7, 'notes.txt', 'text/plain', 500);
 	`)
-	db.Close()
+	_ = db.Close()
 	if err != nil {
 		t.Fatalf("insert new messages: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestBuildCache_IncrementalExport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	countRows := func(pattern string) int64 {
 		var count int64
@@ -530,7 +530,7 @@ func TestBuildCache_BackfillsMissingConversations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	var count int64
 	q := "SELECT COUNT(*) FROM read_parquet('" + filepath.Join(conversationsDir, "*.parquet") + "')"
@@ -588,7 +588,7 @@ func TestBuildCache_BackfillAfterIncrementalNoDuplicates(t *testing.T) {
 			(7, 1, 'to', 'Alice Smith');
 		INSERT INTO message_labels (message_id, label_id) VALUES (6, 1), (7, 1);
 	`)
-	sqliteDB.Close()
+	_ = sqliteDB.Close()
 	if err != nil {
 		t.Fatalf("insert incremental data: %v", err)
 	}
@@ -622,7 +622,7 @@ func TestBuildCache_BackfillAfterIncrementalNoDuplicates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	countRows := func(pattern string) int64 {
 		var count int64
@@ -689,7 +689,7 @@ func TestBuildCache_BackfillWithNewMessages(t *testing.T) {
 			(6, 1, 'from', 'Alice Smith'),
 			(6, 2, 'to', 'Bob Jones');
 	`)
-	sqliteDB.Close()
+	_ = sqliteDB.Close()
 	if err != nil {
 		t.Fatalf("insert new data: %v", err)
 	}
@@ -709,7 +709,7 @@ func TestBuildCache_BackfillWithNewMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	var count int64
 	q := "SELECT COUNT(*) FROM read_parquet('" + filepath.ToSlash(filepath.Join(recipientsDir, "*.parquet")) + "')"
@@ -779,7 +779,7 @@ func TestBuildCache_BackfillMissingMessages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	var count int64
 	q := "SELECT COUNT(*) FROM read_parquet('" + filepath.ToSlash(filepath.Join(messagesDir, "**", "*.parquet")) + "', hive_partitioning=true)"
@@ -843,7 +843,7 @@ func TestBuildCache_DeletedMessagesIncluded(t *testing.T) {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	_, err = db.Exec("UPDATE messages SET deleted_from_source_at = '2024-06-01 12:00:00' WHERE id = 3")
-	db.Close()
+	_ = db.Close()
 	if err != nil {
 		t.Fatalf("mark deleted: %v", err)
 	}
@@ -861,7 +861,7 @@ func TestBuildCache_DeletedMessagesIncluded(t *testing.T) {
 
 	// Verify deleted_from_source_at is preserved
 	duckdb, _ := sql.Open("duckdb", "")
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	var deletedCount int64
 	query := "SELECT COUNT(*) FROM read_parquet('" + filepath.Join(analyticsDir, "messages", "**", "*.parquet") + "') WHERE deleted_from_source_at IS NOT NULL"
@@ -891,7 +891,7 @@ func TestBuildCache_MessagesWithoutSentAt(t *testing.T) {
 		INSERT INTO messages (id, source_id, source_message_id, subject, snippet, size_estimate)
 		VALUES (6, 1, 'msg6', 'No Date', 'Preview', 100)
 	`)
-	db.Close()
+	_ = db.Close()
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -925,7 +925,7 @@ func TestBuildCache_EndToEndWithQueryEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Build the CTEs like the query engine does
 	ctes := `
@@ -959,7 +959,7 @@ func TestBuildCache_EndToEndWithQueryEngine(t *testing.T) {
 		_ = rows.Scan(&email, &count)
 		senderCounts[email] = count
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	if senderCounts["alice@example.com"] != 3 {
 		t.Errorf("expected alice sent 3 messages, got %d", senderCounts["alice@example.com"])
@@ -989,7 +989,7 @@ func TestBuildCache_EndToEndWithQueryEngine(t *testing.T) {
 		_ = rows.Scan(&name, &count)
 		labelCounts[name] = count
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	if labelCounts["INBOX"] != 5 {
 		t.Errorf("expected INBOX has 5 messages, got %d", labelCounts["INBOX"])
@@ -1045,7 +1045,7 @@ func TestBuildCache_YearPartitioning(t *testing.T) {
 			(6, 1, 'msg6', 'Old Message', '2020-06-15 10:00:00', 100),
 			(7, 1, 'msg7', 'Recent Message', '2025-01-15 10:00:00', 100);
 	`)
-	db.Close()
+	_ = db.Close()
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -1083,7 +1083,7 @@ func TestBuildCache_UTF8Handling(t *testing.T) {
 		UPDATE messages SET subject = 'Test émoji 🎉 and unicode' WHERE id = 1;
 		UPDATE participants SET display_name = 'Müller' WHERE id = 1;
 	`)
-	db.Close()
+	_ = db.Close()
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -1100,7 +1100,7 @@ func TestBuildCache_UTF8Handling(t *testing.T) {
 
 	// Verify data is readable
 	duckdb, _ := sql.Open("duckdb", "")
-	defer duckdb.Close()
+	defer func() { _ = duckdb.Close() }()
 
 	var subject string
 	query := "SELECT subject FROM read_parquet('" + filepath.Join(analyticsDir, "messages", "**", "*.parquet") + "') WHERE id = 1"
@@ -1119,7 +1119,7 @@ func TestBuildCache_EmptyDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dbPath := filepath.Join(tmpDir, "empty.db")
 	analyticsDir := filepath.Join(tmpDir, "analytics")
@@ -1136,7 +1136,7 @@ func TestBuildCache_EmptyDatabase(t *testing.T) {
 		CREATE TABLE attachments (message_id INTEGER, size INTEGER, filename TEXT);
 		CREATE TABLE conversations (id INTEGER PRIMARY KEY, source_conversation_id TEXT);
 	`)
-	db.Close()
+	_ = db.Close()
 
 	result, err := buildCache(dbPath, analyticsDir, false)
 	if err != nil {
@@ -1187,18 +1187,18 @@ func TestCSVFallbackPath(t *testing.T) {
 	for _, tbl := range tables {
 		csvPath := filepath.Join(csvDir, tbl.name+".csv")
 		if err := exportToCSV(sqliteDB, tbl.query, csvPath); err != nil {
-			sqliteDB.Close()
+			_ = sqliteDB.Close()
 			t.Fatalf("exportToCSV %s: %v", tbl.name, err)
 		}
 	}
-	sqliteDB.Close()
+	_ = sqliteDB.Close()
 
 	// 2. Open DuckDB and create views (same as setupSQLiteSource)
 	duckDB, err := sql.Open("duckdb", "")
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	defer duckDB.Close()
+	defer func() { _ = duckDB.Close() }()
 
 	if _, err := duckDB.Exec("CREATE SCHEMA sqlite_db"); err != nil {
 		t.Fatalf("create schema: %v", err)
@@ -1318,7 +1318,7 @@ func BenchmarkBuildCache(b *testing.B) {
 	if err != nil {
 		b.Fatalf("create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dbPath := filepath.Join(tmpDir, "bench.db")
 	analyticsDir := filepath.Join(tmpDir, "analytics")
@@ -1369,12 +1369,12 @@ func BenchmarkBuildCache(b *testing.B) {
 			_, _ = db.Exec("INSERT INTO message_labels VALUES (?, 2)", i)
 		}
 	}
-	db.Close()
+	_ = db.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Clear analytics dir between runs
-		os.RemoveAll(analyticsDir)
+		_ = os.RemoveAll(analyticsDir)
 		if _, err := buildCache(dbPath, analyticsDir, true); err != nil {
 			b.Fatalf("buildCache: %v", err)
 		}
@@ -1395,10 +1395,10 @@ func setupTestSQLiteEmpty(t *testing.T) (string, func()) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("open sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	schema := `
 		CREATE TABLE sources (
@@ -1462,7 +1462,7 @@ func setupTestSQLiteEmpty(t *testing.T) (string, func()) {
 		);
 	`
 	if _, err := db.Exec(schema); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("create schema: %v", err)
 	}
 
@@ -1473,11 +1473,11 @@ func setupTestSQLiteEmpty(t *testing.T) (string, func()) {
 		INSERT INTO labels (id, source_id, name) VALUES (1, 1, 'INBOX');
 	`
 	if _, err := db.Exec(metadata); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("insert metadata: %v", err)
 	}
 
-	return tmpDir, func() { os.RemoveAll(tmpDir) }
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }
 }
 
 // TestBuildCache_ZeroMessagesNoRepeatedRebuilds verifies that when the DB has
@@ -1604,7 +1604,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open db: %v", err)
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				_, err = db.Exec(`INSERT INTO messages (id, source_id, source_message_id, sent_at) VALUES (10, 1, 'msg10', datetime('now'))`)
 				if err != nil {
 					t.Fatalf("insert message: %v", err)
@@ -1623,7 +1623,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open db: %v", err)
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				_, err = db.Exec(`INSERT INTO messages (id, source_id, source_message_id, sent_at) VALUES (10, 1, 'msg10', datetime('now'))`)
 				if err != nil {
 					t.Fatalf("insert message: %v", err)
@@ -1641,7 +1641,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open db: %v", err)
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				_, err = db.Exec(`INSERT INTO messages (id, source_id, source_message_id, sent_at) VALUES (5, 1, 'msg5', datetime('now'))`)
 				if err != nil {
 					t.Fatalf("insert message: %v", err)
@@ -1660,7 +1660,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open db: %v", err)
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				_, err = db.Exec(`INSERT INTO messages (id, source_id, source_message_id, sent_at, deleted_from_source_at) VALUES (10, 1, 'msg10', datetime('now'), datetime('now'))`)
 				if err != nil {
 					t.Fatalf("insert message: %v", err)
@@ -1688,7 +1688,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 			name: "DBOpenFailure_NeedsBuild",
 			setup: func(t *testing.T, dbPath, analyticsDir string) {
 				// Replace DB file with a directory so store.Open fails
-				os.Remove(dbPath)
+				_ = os.Remove(dbPath)
 				if err := os.MkdirAll(dbPath, 0755); err != nil {
 					t.Fatalf("MkdirAll: %v", err)
 				}
@@ -1706,7 +1706,7 @@ func TestCacheNeedsBuild(t *testing.T) {
 				if err != nil {
 					t.Fatalf("open db: %v", err)
 				}
-				defer db.Close()
+				defer func() { _ = db.Close() }()
 				_, err = db.Exec(`INSERT INTO messages (id, source_id, source_message_id, sent_at) VALUES (5, 1, 'msg5', datetime('now'))`)
 				if err != nil {
 					t.Fatalf("insert message: %v", err)
@@ -1945,7 +1945,7 @@ func BenchmarkBuildCacheIncremental(b *testing.B) {
 	if err != nil {
 		b.Fatalf("create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	dbPath := filepath.Join(tmpDir, "bench.db")
 	analyticsDir := filepath.Join(tmpDir, "analytics")
@@ -1995,7 +1995,7 @@ func BenchmarkBuildCacheIncremental(b *testing.B) {
 		_, _ = db.Exec("INSERT INTO message_recipients VALUES (?, 2, 'to', NULL)", i)
 		_, _ = db.Exec("INSERT INTO message_labels VALUES (?, 1)", i)
 	}
-	db.Close()
+	_ = db.Close()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

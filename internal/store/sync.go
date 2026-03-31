@@ -344,7 +344,7 @@ func (s *Store) ListSources(sourceType string) ([]*Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list sources: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var sources []*Source
 	for rows.Next() {

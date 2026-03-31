@@ -56,7 +56,7 @@ func showRemoteMessage(idStr string) error {
 	if err != nil {
 		return fmt.Errorf("connect to remote: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	msg, err := s.GetMessage(id)
 	if err != nil {
@@ -80,7 +80,7 @@ func showLocalMessage(cmd *cobra.Command, idStr string) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Create query engine
 	engine := query.NewSQLiteEngine(s.DB())

@@ -68,7 +68,7 @@ func setupExportAttachmentsTest(t *testing.T) (dataDir string, msgID int64) {
 	createTestAttachment(t, db, attDir, 1, 1, "report.pdf", []byte("PDF content here"))
 	createTestAttachment(t, db, attDir, 2, 1, "photo.jpg", []byte("JPEG image data"))
 
-	s.Close()
+	_ = s.Close()
 	return dataDir, 1
 }
 

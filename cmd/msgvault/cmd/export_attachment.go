@@ -108,7 +108,7 @@ func exportAttachmentAsBase64(storagePath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	encoder := base64.NewEncoder(base64.StdEncoding, os.Stdout)
 	if _, err := io.Copy(encoder, f); err != nil {
@@ -126,7 +126,7 @@ func exportAttachmentBinary(storagePath, contentHash string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	outputPath := exportAttachmentOutput
 	if outputPath == "" || outputPath == "-" {
@@ -142,11 +142,11 @@ func exportAttachmentBinary(storagePath, contentHash string) error {
 	n, copyErr := io.Copy(dst, f)
 	closeErr := dst.Close()
 	if copyErr != nil {
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 		return fmt.Errorf("write file: %w", copyErr)
 	}
 	if closeErr != nil {
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 		return fmt.Errorf("close file: %w", closeErr)
 	}
 

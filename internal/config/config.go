@@ -227,8 +227,8 @@ func Load(path, homeDir string) (*Config, error) {
 	if _, err := toml.DecodeFile(path, cfg); err != nil {
 		if strings.Contains(err.Error(), "invalid escape") ||
 			strings.Contains(err.Error(), "hexadecimal digits after") {
-			return nil, fmt.Errorf("decode config: %w\n\nhint: Windows paths in TOML must use "+
-				"forward slashes (C:/Games/msgvault) or single quotes ('C:\\Games\\msgvault').", err)
+			return nil, fmt.Errorf("decode config: %w -- hint: Windows paths in TOML must use "+
+				"forward slashes (C:/Games/msgvault) or single quotes ('C:\\Games\\msgvault')", err)
 		}
 		return nil, fmt.Errorf("decode config: %w", err)
 	}
@@ -327,8 +327,8 @@ func (c *Config) Save() error {
 	success := false
 	defer func() {
 		if !success {
-			tmp.Close()
-			os.Remove(tmpPath)
+			_ = tmp.Close()
+			_ = os.Remove(tmpPath)
 		}
 	}()
 

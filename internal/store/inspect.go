@@ -79,7 +79,7 @@ func (s *Store) InspectMessage(sourceMessageID string) (*MessageInspection, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var recipType string
 		var count int
@@ -103,7 +103,7 @@ func (s *Store) InspectMessage(sourceMessageID string) (*MessageInspection, erro
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var recipType, email, displayName string
 		if err := rows.Scan(&recipType, &email, &displayName); err != nil {

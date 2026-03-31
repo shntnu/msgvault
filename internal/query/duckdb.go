@@ -90,7 +90,7 @@ func NewDuckDBEngine(analyticsDir string, sqlitePath string, sqliteDB *sql.DB, o
 	// Use GOMAXPROCS(0) instead of NumCPU() to respect container CPU limits.
 	threads := runtime.GOMAXPROCS(0)
 	if _, err := db.Exec(fmt.Sprintf("SET threads = %d", threads)); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set threads: %w", err)
 	}
 
@@ -868,7 +868,7 @@ func (e *DuckDBEngine) executeAggregateQuery(ctx context.Context, query string, 
 	if err != nil {
 		return nil, fmt.Errorf("aggregate query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []AggregateRow
 	for rows.Next() {
@@ -995,7 +995,7 @@ func (e *DuckDBEngine) ListAccounts(ctx context.Context) ([]AccountInfo, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var accounts []AccountInfo
 	for rows.Next() {
@@ -1086,7 +1086,7 @@ func (e *DuckDBEngine) ListMessages(ctx context.Context, filter MessageFilter) (
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []MessageSummary
 	for rows.Next() {
@@ -1356,7 +1356,7 @@ func (e *DuckDBEngine) Search(ctx context.Context, q *search.Query, limit, offse
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []MessageSummary
 	for rows.Next() {
@@ -1531,7 +1531,7 @@ func (e *DuckDBEngine) GetGmailIDsByFilter(ctx context.Context, filter MessageFi
 	if err != nil {
 		return nil, fmt.Errorf("get gmail ids: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return collectGmailIDs(rows)
 }
@@ -1649,7 +1649,7 @@ func (e *DuckDBEngine) SearchFast(ctx context.Context, q *search.Query, filter M
 	if err != nil {
 		return nil, fmt.Errorf("search fast: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []MessageSummary
 	for rows.Next() {
@@ -1797,7 +1797,7 @@ func (e *DuckDBEngine) searchPageFromCache(ctx context.Context, limit, offset in
 	if err != nil {
 		return nil, fmt.Errorf("search fast page: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	// Return a copy of cached stats to prevent callers from mutating the cache
 	var statsCopy *TotalStats

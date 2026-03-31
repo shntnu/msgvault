@@ -34,14 +34,14 @@ func newTestEnv(t *testing.T, opt ...*Options) *TestEnv {
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(tmpDir) })
+	t.Cleanup(func() { _ = os.RemoveAll(tmpDir) })
 
 	dbPath := filepath.Join(tmpDir, "test.db")
 	st, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 
 	if err := st.InitSchema(); err != nil {
 		t.Fatalf("init schema: %v", err)

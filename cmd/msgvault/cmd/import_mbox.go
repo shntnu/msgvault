@@ -86,11 +86,11 @@ Examples:
 					}
 					signals++
 					if signals == 1 {
-						fmt.Fprintln(cmd.ErrOrStderr(), "\nInterrupted. Saving checkpoint...")
+						_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "\nInterrupted. Saving checkpoint...")
 						cancel()
 						continue
 					}
-					fmt.Fprintln(cmd.ErrOrStderr(), "Interrupted again. Exiting immediately.")
+					_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Interrupted again. Exiting immediately.")
 					os.Exit(130)
 				}
 			}
@@ -101,7 +101,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		defer st.Close()
+		defer func() { _ = st.Close() }()
 
 		if err := st.InitSchema(); err != nil {
 			return fmt.Errorf("init schema: %w", err)
@@ -291,25 +291,25 @@ Examples:
 
 		out := cmd.OutOrStdout()
 		if ctx.Err() != nil {
-			fmt.Fprintln(out, "Import interrupted. Run again to resume.")
+			_, _ = fmt.Fprintln(out, "Import interrupted. Run again to resume.")
 		} else if totalErrors > 0 {
-			fmt.Fprintln(out, "Import complete (with errors).")
+			_, _ = fmt.Fprintln(out, "Import complete (with errors).")
 		} else {
-			fmt.Fprintln(out, "Import complete.")
+			_, _ = fmt.Fprintln(out, "Import complete.")
 		}
 		for _, p := range processedFiles {
 			if p.Partial {
-				fmt.Fprintf(out, "  Imported (partial): %s\n", p.Path)
+				_, _ = fmt.Fprintf(out, "  Imported (partial): %s\n", p.Path)
 			} else {
-				fmt.Fprintf(out, "  Imported:           %s\n", p.Path)
+				_, _ = fmt.Fprintf(out, "  Imported:           %s\n", p.Path)
 			}
 		}
-		fmt.Fprintf(out, "  Processed:      %d messages\n", totalProcessed)
-		fmt.Fprintf(out, "  Added:          %d messages\n", totalAdded)
-		fmt.Fprintf(out, "  Updated:        %d messages\n", totalUpdated)
-		fmt.Fprintf(out, "  Skipped:        %d messages\n", totalSkipped)
-		fmt.Fprintf(out, "  Errors:         %d\n", totalErrors)
-		fmt.Fprintf(out, "  Bytes:          %.2f MB\n", float64(totalBytes)/(1024*1024))
+		_, _ = fmt.Fprintf(out, "  Processed:      %d messages\n", totalProcessed)
+		_, _ = fmt.Fprintf(out, "  Added:          %d messages\n", totalAdded)
+		_, _ = fmt.Fprintf(out, "  Updated:        %d messages\n", totalUpdated)
+		_, _ = fmt.Fprintf(out, "  Skipped:        %d messages\n", totalSkipped)
+		_, _ = fmt.Fprintf(out, "  Errors:         %d\n", totalErrors)
+		_, _ = fmt.Fprintf(out, "  Bytes:          %.2f MB\n", float64(totalBytes)/(1024*1024))
 
 		if ctx.Err() == nil && hadHardErrors {
 			return fmt.Errorf("import completed with %d errors", totalErrors)

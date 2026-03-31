@@ -42,7 +42,7 @@ charset detection issues in the MIME parser.`,
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 
 		return repairEncoding(s)
 	},
@@ -149,7 +149,7 @@ func repairMessageFields(s *store.Store, stats *repairStats) error {
 	if err != nil {
 		return fmt.Errorf("query messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	type messageRepair struct {
 		id                                       int64
@@ -380,7 +380,7 @@ func repairDisplayNames(s *store.Store, stats *repairStats) error {
 				_ = tx.Rollback()
 				return fmt.Errorf("prepare update: %w", err)
 			}
-			defer stmt.Close()
+			defer func() { _ = stmt.Close() }()
 
 			for _, r := range repairs {
 				if _, err := stmt.Exec(r.newName, r.id); err != nil {
@@ -419,7 +419,7 @@ func repairDisplayNames(s *store.Store, stats *repairStats) error {
 				// Apply batch when full
 				if len(repairs) >= batchSize {
 					if err := applyBatch(); err != nil {
-						rows.Close()
+						_ = rows.Close()
 						return err
 					}
 				}
@@ -427,10 +427,10 @@ func repairDisplayNames(s *store.Store, stats *repairStats) error {
 		}
 
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("iterate %s: %w", table.name, err)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		// Apply remaining repairs
 		if err := applyBatch(); err != nil {
@@ -534,7 +534,7 @@ func repairOtherStrings(s *store.Store, stats *repairStats) error {
 				_ = tx.Rollback()
 				return fmt.Errorf("prepare update: %w", err)
 			}
-			defer stmt.Close()
+			defer func() { _ = stmt.Close() }()
 
 			for _, r := range repairs {
 				if _, err := stmt.Exec(r.newValue, r.id); err != nil {
@@ -572,7 +572,7 @@ func repairOtherStrings(s *store.Store, stats *repairStats) error {
 
 				if len(repairs) >= batchSize {
 					if err := applyBatch(); err != nil {
-						rows.Close()
+						_ = rows.Close()
 						return err
 					}
 				}
@@ -580,10 +580,10 @@ func repairOtherStrings(s *store.Store, stats *repairStats) error {
 		}
 
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return fmt.Errorf("iterate %s: %w", table.name, err)
 		}
-		rows.Close()
+		_ = rows.Close()
 
 		if err := applyBatch(); err != nil {
 			return err
@@ -610,7 +610,7 @@ func tryParseMIME(rawData []byte, compression sql.NullString) *mime.Message {
 			return nil
 		}
 		rawData, err = io.ReadAll(r)
-		r.Close()
+		_ = r.Close()
 		if err != nil {
 			return nil
 		}

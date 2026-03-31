@@ -63,7 +63,7 @@ func Open(dbPath string) (*Store, error) {
 
 	// Test connection
 	if err := db.Ping(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("ping database: %w", err)
 	}
 
@@ -154,11 +154,11 @@ func queryInChunks[T any](db *sql.DB, ids []T, prefixArgs []interface{}, queryTe
 
 		for rows.Next() {
 			if err := fn(rows); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return err
 			}
 		}
-		rows.Close()
+		_ = rows.Close()
 		if err := rows.Err(); err != nil {
 			return err
 		}

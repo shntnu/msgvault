@@ -195,7 +195,7 @@ func ImportMbox(ctx context.Context, st *store.Store, mboxPath string, opts Mbox
 		_ = st.FailSync(syncID, err.Error())
 		return nil, fmt.Errorf("open mbox: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	fi, err := f.Stat()
 	if err != nil {
@@ -234,8 +234,8 @@ func ImportMbox(ctx context.Context, st *store.Store, mboxPath string, opts Mbox
 	// If we resumed at a saved offset, the reader's logical Offset() should now be that.
 	// However, if the offset lands in the middle of a line (corrupt checkpoint), the
 	// reader will scan to the next separator.
-	var lastCheckpointOffset int64 = offset
-	var lastCheckpointSeq int64 = seq
+	var lastCheckpointOffset = offset
+	var lastCheckpointSeq = seq
 	checkpointBlocked := false
 	hardErrors := false
 

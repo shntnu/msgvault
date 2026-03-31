@@ -102,7 +102,7 @@ func TestIngestRawMessage_SanitizesAddressFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query participants: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var emailAddr string

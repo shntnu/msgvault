@@ -81,7 +81,7 @@ func runRemoteSearch(queryStr string) error {
 	if err != nil {
 		return fmt.Errorf("connect to remote: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	results, total, err := s.SearchMessages(queryStr, searchOffset, searchLimit)
 	fmt.Fprintf(os.Stderr, "\r                                                      \r")
@@ -117,7 +117,7 @@ func runLocalSearch(cmd *cobra.Command, queryStr string) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	// Ensure schema is up to date and FTS index is populated
 	if err := s.InitSchema(); err != nil {
@@ -167,36 +167,36 @@ func runLocalSearch(cmd *cobra.Command, queryStr string) error {
 
 func outputSearchResultsTable(results []query.MessageSummary) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tSIZE")
-	fmt.Fprintln(w, "──\t────\t────\t───────\t────")
+	_, _ = fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tSIZE")
+	_, _ = fmt.Fprintln(w, "──\t────\t────\t───────\t────")
 
 	for _, msg := range results {
 		date := msg.SentAt.Format("2006-01-02")
 		from := truncate(msg.FromEmail, 30)
 		subject := truncate(msg.Subject, 50)
 		size := formatSize(msg.SizeEstimate)
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", msg.ID, date, from, subject, size)
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", msg.ID, date, from, subject, size)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 	fmt.Printf("\nShowing %d results\n", len(results))
 	return nil
 }
 
 func outputRemoteSearchResultsTable(results []store.APIMessage, total int64) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tSIZE")
-	fmt.Fprintln(w, "──\t────\t────\t───────\t────")
+	_, _ = fmt.Fprintln(w, "ID\tDATE\tFROM\tSUBJECT\tSIZE")
+	_, _ = fmt.Fprintln(w, "──\t────\t────\t───────\t────")
 
 	for _, msg := range results {
 		date := msg.SentAt.Format("2006-01-02")
 		from := truncate(msg.From, 30)
 		subject := truncate(msg.Subject, 50)
 		size := formatSize(msg.SizeEstimate)
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", msg.ID, date, from, subject, size)
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\n", msg.ID, date, from, subject, size)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 	fmt.Printf("\nShowing %d of %d results\n", len(results), total)
 	return nil
 }

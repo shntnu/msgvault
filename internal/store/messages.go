@@ -301,7 +301,7 @@ func (s *Store) GetMessageRaw(messageID int64) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("zlib reader: %w", err)
 		}
-		defer r.Close()
+		defer func() { _ = r.Close() }()
 		return io.ReadAll(r)
 	}
 
@@ -728,7 +728,7 @@ func (s *Store) GetRandomMessageIDs(sourceID int64, limit int) ([]int64, error) 
 		if err != nil {
 			return nil, err
 		}
-		defer rows.Close()
+		defer func() { _ = rows.Close() }()
 
 		var ids []int64
 		for rows.Next() {

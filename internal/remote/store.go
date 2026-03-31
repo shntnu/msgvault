@@ -137,7 +137,7 @@ func (s *Store) GetStats() (*store.Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, handleErrorResponse(resp)
@@ -244,7 +244,7 @@ func (s *Store) ListMessages(offset, limit int) ([]store.APIMessage, int64, erro
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, handleErrorResponse(resp)
@@ -270,7 +270,7 @@ func (s *Store) GetMessage(id int64) (*store.APIMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, nil
@@ -325,7 +325,7 @@ func (s *Store) SearchMessages(query string, offset, limit int) ([]store.APIMess
 	if err != nil {
 		return nil, 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, 0, handleErrorResponse(resp)
@@ -366,7 +366,7 @@ func (s *Store) ListAccounts() ([]AccountInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, handleErrorResponse(resp)

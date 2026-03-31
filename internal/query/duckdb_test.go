@@ -35,7 +35,7 @@ func newSQLiteEngine(t *testing.T) *DuckDBEngine {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	t.Cleanup(func() { engine.Close() })
+	t.Cleanup(func() { _ = engine.Close() })
 	return engine
 }
 
@@ -193,7 +193,7 @@ func TestDuckDBEngine_SQLiteEngineReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// Verify sqliteEngine was created
 	if engine.sqliteEngine == nil {
@@ -304,7 +304,7 @@ func TestDuckDBEngine_SQLiteEngineFTSCacheReuse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// Capture the shared engine to verify cache state
 	sharedEngine := engine.sqliteEngine
@@ -377,7 +377,7 @@ func TestDuckDBEngine_NoSQLiteDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// sqliteEngine should be nil
 	if engine.sqliteEngine != nil {
@@ -452,7 +452,7 @@ func TestDuckDBEngine_DeletedMessagesIncluded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	t.Cleanup(func() { engine.Close() })
+	t.Cleanup(func() { _ = engine.Close() })
 
 	ctx := context.Background()
 
@@ -490,7 +490,7 @@ func TestDuckDBEngine_SearchHideDeleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	t.Cleanup(func() { engine.Close() })
+	t.Cleanup(func() { _ = engine.Close() })
 
 	ctx := context.Background()
 
@@ -1136,7 +1136,7 @@ func TestDuckDBEngine_ThreadCount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// Query the current thread setting
 	var threads int
@@ -1718,7 +1718,7 @@ func TestDuckDBEngine_GetGmailIDsByFilter_NoDataSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	ctx := context.Background()
 	_, err = engine.GetGmailIDsByFilter(ctx, MessageFilter{Sender: "test@example.com"})

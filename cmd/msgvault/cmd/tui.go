@@ -73,7 +73,7 @@ Remote Mode:
 			if err != nil {
 				return fmt.Errorf("connect to remote: %w", err)
 			}
-			defer remoteEngine.Close()
+			defer func() { _ = remoteEngine.Close() }()
 			engine = remoteEngine
 			isRemote = true
 			fmt.Printf("Connected to remote: %s\n", cfg.Remote.URL)
@@ -84,7 +84,7 @@ Remote Mode:
 			if err != nil {
 				return fmt.Errorf("open database: %w", err)
 			}
-			defer s.Close()
+			defer func() { _ = s.Close() }()
 
 			// Ensure schema is up to date
 			if err := s.InitSchema(); err != nil {
@@ -130,7 +130,7 @@ Remote Mode:
 					engine = query.NewSQLiteEngine(s.DB())
 				} else {
 					engine = duckEngine
-					defer duckEngine.Close()
+					defer func() { _ = duckEngine.Close() }()
 				}
 			} else {
 				// Use SQLite directly
@@ -207,7 +207,7 @@ func cacheNeedsBuild(dbPath, analyticsDir string) cacheStaleness {
 			Reason: "cannot verify cache status",
 		}
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	var maxID int64
 	err = db.DB().QueryRow(`

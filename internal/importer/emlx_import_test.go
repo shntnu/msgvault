@@ -194,7 +194,7 @@ func TestImportEmlxDir_MultiMailboxLabels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query labels: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {

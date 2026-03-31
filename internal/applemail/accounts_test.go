@@ -19,7 +19,7 @@ func createTestAccountsDB(t *testing.T, accounts []testAccount) string {
 	if err != nil {
 		t.Fatalf("create test db: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	_, err = db.Exec(`
 		CREATE TABLE ZACCOUNT (

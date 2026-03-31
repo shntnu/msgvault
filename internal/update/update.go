@@ -139,7 +139,7 @@ func PerformUpdate(info *UpdateInfo, progressFn func(downloaded, total int64)) e
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(tempDir)
+	defer func() { _ = os.RemoveAll(tempDir) }()
 
 	archivePath := filepath.Join(tempDir, info.AssetName)
 	downloadChecksum, err := downloadFile(info.DownloadURL, archivePath, info.Size, progressFn)
@@ -161,7 +161,7 @@ func hashFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -198,7 +198,7 @@ func installFromArchiveTo(archivePath, expectedChecksum, dstPath string, precomp
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(extractDir)
+	defer func() { _ = os.RemoveAll(extractDir) }()
 
 	if strings.HasSuffix(archivePath, ".zip") {
 		if err := extractZip(archivePath, extractDir); err != nil {
@@ -263,7 +263,7 @@ func installBinaryTo(srcPath, dstPath string) error {
 	// Remove stale backup from a previous update. On Windows this may fail
 	// if the previous binary is still running; that's fine — it will be
 	// cleaned up on the next successful update.
-	os.Remove(backupPath)
+	_ = os.Remove(backupPath)
 
 	// Backup existing binary if it exists (rename works even on Windows
 	// for the currently running executable).
@@ -287,7 +287,7 @@ func installBinaryTo(srcPath, dstPath string) error {
 	// Clean up backup. On Windows this will fail for the running executable
 	// (silently ignored); the stale .old file is removed at the top of the
 	// next update.
-	os.Remove(backupPath)
+	_ = os.Remove(backupPath)
 
 	return nil
 }
@@ -309,7 +309,7 @@ func fetchLatestRelease() (*Release, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub API returned %s", resp.Status)
@@ -328,7 +328,7 @@ func downloadFile(url, dest string, totalSize int64, progressFn func(downloaded,
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download failed: %s", resp.Status)
@@ -338,7 +338,7 @@ func downloadFile(url, dest string, totalSize int64, progressFn func(downloaded,
 	if err != nil {
 		return "", err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	hasher := sha256.New()
 	writer := io.MultiWriter(out, hasher)
@@ -382,13 +382,13 @@ func extractTarGz(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	gzr, err := gzip.NewReader(file)
 	if err != nil {
 		return err
 	}
-	defer gzr.Close()
+	defer func() { _ = gzr.Close() }()
 
 	tr := tar.NewReader(gzr)
 	for {
@@ -424,10 +424,10 @@ func extractTarGz(archivePath, destDir string) error {
 				return err
 			}
 			if _, err := io.Copy(outFile, tr); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return err
 			}
-			outFile.Close()
+			_ = outFile.Close()
 			if err := os.Chmod(target, os.FileMode(header.Mode)); err != nil {
 				return err
 			}
@@ -484,7 +484,7 @@ func extractZip(archivePath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	for _, f := range r.File {
 		target, err := sanitizeTarPath(absDestDir, f.Name)
@@ -510,13 +510,13 @@ func extractZip(archivePath, destDir string) error {
 
 		outFile, err := os.Create(target)
 		if err != nil {
-			rc.Close()
+			_ = rc.Close()
 			return err
 		}
 
 		_, copyErr := io.Copy(outFile, rc)
 		closeErr := outFile.Close()
-		rc.Close()
+		_ = rc.Close()
 		if copyErr != nil {
 			return copyErr
 		}
@@ -533,13 +533,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
+	defer func() { _ = in.Close() }()
 
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	if _, err := io.Copy(out, in); err != nil {
 		return err
@@ -554,7 +554,7 @@ func fetchChecksumFromFile(url, assetName string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("failed to fetch checksums: %s", resp.Status)

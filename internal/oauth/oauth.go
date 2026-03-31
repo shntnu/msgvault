@@ -88,7 +88,7 @@ func (m *Manager) TokenSource(ctx context.Context, email string) (oauth2.TokenSo
 		return nil, fmt.Errorf("refresh token: %w", err)
 	}
 
-	if newToken.AccessToken != tf.Token.AccessToken {
+	if newToken.AccessToken != tf.AccessToken {
 		// Preserve the original scopes when saving refreshed token
 		scopes := tf.Scopes
 		if len(scopes) == 0 {
@@ -211,17 +211,17 @@ func (m *Manager) newCallbackHandler(expectedState string, codeChan chan<- strin
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("state") != expectedState {
 			errChan <- fmt.Errorf("state mismatch: possible CSRF attack")
-			fmt.Fprintf(w, "Error: state mismatch")
+			_, _ = fmt.Fprintf(w, "Error: state mismatch")
 			return
 		}
 		code := r.URL.Query().Get("code")
 		if code == "" {
 			errChan <- fmt.Errorf("no code in callback")
-			fmt.Fprintf(w, "Error: no authorization code received")
+			_, _ = fmt.Fprintf(w, "Error: no authorization code received")
 			return
 		}
 		codeChan <- code
-		fmt.Fprintf(w, "Authorization successful! You can close this window.")
+		_, _ = fmt.Fprintf(w, "Authorization successful! You can close this window.")
 	}
 }
 
@@ -517,20 +517,20 @@ func (m *Manager) saveToken(email string, token *oauth2.Token, scopes []string) 
 	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write temp token file: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp token file: %w", err)
 	}
 	if err := fileutil.SecureChmod(tmpPath, 0600); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("chmod temp token file: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename temp token file: %w", err)
 	}
 	return nil

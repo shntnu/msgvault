@@ -20,7 +20,7 @@ func NewTestStore(t *testing.T) *store.Store {
 
 	// Register close on cleanup
 	t.Cleanup(func() {
-		st.Close()
+		_ = st.Close()
 	})
 
 	// Initialize schema

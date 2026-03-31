@@ -190,7 +190,7 @@ func validateExistingAttachmentFile(fullPath string, expectedSize int64, expecte
 		}
 		time.Sleep(time.Duration(attempt+1) * 10 * time.Millisecond)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	st, err := f.Stat()
 	if err != nil {

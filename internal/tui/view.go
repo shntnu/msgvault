@@ -1197,7 +1197,7 @@ func (m Model) renderDeleteConfirmModal() string {
 	var sb strings.Builder
 	sb.WriteString(modalTitleStyle.Render("Confirm Deletion"))
 	sb.WriteString("\n\n")
-	sb.WriteString(fmt.Sprintf("Stage %d messages for deletion?\n\n", len(m.pendingManifest.GmailIDs)))
+	_, _ = fmt.Fprintf(&sb, "Stage %d messages for deletion?\n\n", len(m.pendingManifest.GmailIDs))
 	sb.WriteString("This creates a deletion batch. Messages will NOT be\n")
 	sb.WriteString("deleted until you run 'msgvault delete-staged'.\n\n")
 	if m.pendingManifest.Filters.Account == "" {
@@ -1231,14 +1231,14 @@ func (m Model) renderAccountSelectorModal() string {
 	if m.modalCursor == 0 {
 		indicator = "●"
 	}
-	sb.WriteString(fmt.Sprintf(" %s All Accounts\n", indicator))
+	_, _ = fmt.Fprintf(&sb, " %s All Accounts\n", indicator)
 	// Individual accounts
 	for i, acc := range m.accounts {
 		indicator = "○"
 		if m.modalCursor == i+1 {
 			indicator = "●"
 		}
-		sb.WriteString(fmt.Sprintf(" %s %s\n", indicator, acc.Identifier))
+		_, _ = fmt.Fprintf(&sb, " %s %s\n", indicator, acc.Identifier)
 	}
 	sb.WriteString("\n[↑/↓] Navigate  [Enter] Select  [Esc] Cancel")
 	return sb.String()
@@ -1268,7 +1268,7 @@ func (m Model) renderFilterModal() string {
 		if opt.checked {
 			checkbox = "[x]"
 		}
-		sb.WriteString(fmt.Sprintf("%s%s %s\n", cursor, checkbox, opt.label))
+		_, _ = fmt.Fprintf(&sb, "%s%s %s\n", cursor, checkbox, opt.label)
 	}
 
 	sb.WriteString("\n[↑/↓] Navigate  [Space/x] Toggle  [Enter/Esc] Apply")
@@ -1321,7 +1321,7 @@ func (m Model) renderExportAttachmentsModal() string {
 		if m.exportSelection[i] {
 			checkbox = "☑"
 		}
-		sb.WriteString(fmt.Sprintf("%s %s %s (%s)\n", cursor, checkbox, att.Filename, formatBytes(att.Size)))
+		_, _ = fmt.Fprintf(&sb, "%s %s %s (%s)\n", cursor, checkbox, att.Filename, formatBytes(att.Size))
 	}
 	// Count selected
 	selectedCount := 0
@@ -1330,7 +1330,7 @@ func (m Model) renderExportAttachmentsModal() string {
 			selectedCount++
 		}
 	}
-	sb.WriteString(fmt.Sprintf("\n%d of %d selected\n", selectedCount, len(m.messageDetail.Attachments)))
+	_, _ = fmt.Fprintf(&sb, "\n%d of %d selected\n", selectedCount, len(m.messageDetail.Attachments))
 	sb.WriteString("\n[↑/↓] Navigate  [Space] Toggle  [a] All  [n] None\n")
 	sb.WriteString("[Enter] Export  [Esc] Cancel")
 	return sb.String()

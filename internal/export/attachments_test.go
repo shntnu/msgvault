@@ -328,7 +328,7 @@ func TestCreateExclusiveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Close()
+		_ = f.Close()
 		if path != p {
 			t.Errorf("path = %q, want %q", path, p)
 		}
@@ -351,7 +351,7 @@ func TestCreateExclusiveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Close()
+		_ = f.Close()
 		if filepath.Base(path) != "existing_1.txt" {
 			t.Errorf("path = %q, want existing_1.txt", filepath.Base(path))
 		}
@@ -370,7 +370,7 @@ func TestCreateExclusiveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Close()
+		_ = f.Close()
 		if filepath.Base(path) != "multi_2.txt" {
 			t.Errorf("path = %q, want multi_2.txt", filepath.Base(path))
 		}
@@ -386,7 +386,7 @@ func TestCreateExclusiveFile(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		f.Close()
+		_ = f.Close()
 		if filepath.Base(path) != "noext_1" {
 			t.Errorf("path = %q, want noext_1", filepath.Base(path))
 		}
@@ -557,7 +557,7 @@ func TestAttachments(t *testing.T) {
 				if err != nil {
 					t.Fatalf("failed to open zip: %v", err)
 				}
-				defer zr.Close()
+				defer func() { _ = zr.Close() }()
 
 				zipEntries := make(map[string]bool)
 				for _, f := range zr.File {

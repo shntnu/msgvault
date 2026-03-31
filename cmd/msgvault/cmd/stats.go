@@ -18,7 +18,7 @@ Use --local to force local database.`,
 		if err != nil {
 			return fmt.Errorf("open store: %w", err)
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 
 		stats, err := s.GetStats()
 		if err != nil {

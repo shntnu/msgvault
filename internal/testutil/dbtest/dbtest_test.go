@@ -82,7 +82,7 @@ func TestAddMessage_DBErrorFailsTest(t *testing.T) {
 	}
 
 	// Close the DB to force a non-ErrNoRows error on the source_id lookup.
-	tdb.DB.Close()
+	_ = tdb.DB.Close()
 
 	func() {
 		defer func() { _ = recover() }()

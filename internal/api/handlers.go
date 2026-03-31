@@ -468,23 +468,23 @@ func (s *Server) handleUploadToken(w http.ResponseWriter, r *http.Request) {
 	tmpPath := tmpFile.Name()
 
 	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to write token")
 		return
 	}
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to close token file")
 		return
 	}
 	if err := fileutil.SecureChmod(tmpPath, 0600); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to set token permissions")
 		return
 	}
 	if err := os.Rename(tmpPath, tokenPath); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		writeError(w, http.StatusInternalServerError, "internal_error", "Failed to save token")
 		return
 	}

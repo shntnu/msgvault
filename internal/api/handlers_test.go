@@ -381,7 +381,7 @@ func TestHandleUploadToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{APIPort: 8080},
@@ -468,7 +468,7 @@ func TestHandleUploadTokenInvalidJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{APIPort: 8080},
@@ -501,7 +501,7 @@ func TestHandleUploadTokenMissingRefreshToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := &config.Config{
 		Server: config.ServerConfig{APIPort: 8080},
@@ -592,7 +592,7 @@ func TestHandleAddAccount(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cfg := &config.Config{
 		Server:  config.ServerConfig{APIPort: 8080},

@@ -83,7 +83,7 @@ func (h *handlers) readAttachmentFile(contentHash string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("attachment file not available: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
@@ -284,11 +284,11 @@ func (h *handlers) exportAttachment(ctx context.Context, req mcp.CallToolRequest
 	_, writeErr := f.Write(data)
 	closeErr := f.Close()
 	if writeErr != nil {
-		os.Remove(outPath)
+		_ = os.Remove(outPath)
 		return mcp.NewToolResultError(fmt.Sprintf("write failed: %v", writeErr)), nil
 	}
 	if closeErr != nil {
-		os.Remove(outPath)
+		_ = os.Remove(outPath)
 		return mcp.NewToolResultError(fmt.Sprintf("write failed: %v", closeErr)), nil
 	}
 

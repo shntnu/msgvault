@@ -39,7 +39,7 @@ func fetchLabelsForMessageList(ctx context.Context, db *sql.DB, tablePrefix stri
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var msgID int64
@@ -67,7 +67,7 @@ func fetchMessageLabelsDetail(ctx context.Context, db *sql.DB, tablePrefix strin
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var name string
@@ -92,7 +92,7 @@ func fetchParticipantsShared(ctx context.Context, db *sql.DB, tablePrefix string
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var recipType, email, name string
@@ -126,7 +126,7 @@ func fetchAttachmentsShared(ctx context.Context, db *sql.DB, tablePrefix string,
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	for rows.Next() {
 		var att AttachmentInfo
@@ -158,7 +158,7 @@ func extractBodyFromRawShared(ctx context.Context, db *sql.DB, tablePrefix strin
 		if err != nil {
 			return "", err
 		}
-		defer r.Close()
+		defer func() { _ = r.Close() }()
 		rawData, err = io.ReadAll(r)
 		if err != nil {
 			return "", err
@@ -267,7 +267,7 @@ func getMessageByQueryShared(ctx context.Context, db *sql.DB, tablePrefix string
 
 // collectGmailIDs scans rows for source_message_id strings.
 func collectGmailIDs(rows *sql.Rows) ([]string, error) {
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string

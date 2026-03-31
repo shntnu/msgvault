@@ -134,7 +134,7 @@ func TestDoRequest_SetsAuthHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doRequest error = %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestDoRequest_OmitsAuthHeaderWhenEmpty(t *testing.T) {
@@ -151,7 +151,7 @@ func TestDoRequest_OmitsAuthHeaderWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("doRequest error = %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 func TestHandleErrorResponse_JSONBody(t *testing.T) {

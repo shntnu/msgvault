@@ -431,7 +431,7 @@ func (b *TestDataBuilder) BuildEngine() *DuckDBEngine {
 	if err != nil {
 		b.t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	b.t.Cleanup(func() { engine.Close() })
+	b.t.Cleanup(func() { _ = engine.Close() })
 	return engine
 }
 
@@ -495,14 +495,14 @@ func (b *parquetBuilder) build() (string, func()) {
 
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		b.t.Fatalf("open duckdb: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	b.writeParquetFiles(db, tmpDir)
 
-	return tmpDir, func() { os.RemoveAll(tmpDir) }
+	return tmpDir, func() { _ = os.RemoveAll(tmpDir) }
 }
 
 // createTempDirs creates the temp directory and all required subdirectories.
@@ -517,7 +517,7 @@ func (b *parquetBuilder) createTempDirs() string {
 	for _, tbl := range b.tables {
 		dir := filepath.Join(tmpDir, tbl.subdir)
 		if err := os.MkdirAll(dir, 0755); err != nil {
-			os.RemoveAll(tmpDir)
+			_ = os.RemoveAll(tmpDir)
 			b.t.Fatalf("create dir %s: %v", dir, err)
 		}
 	}
@@ -573,7 +573,7 @@ func createEngineFromBuilder(t testing.TB, pb *parquetBuilder) *DuckDBEngine {
 	if err != nil {
 		t.Fatalf("NewDuckDBEngine: %v", err)
 	}
-	t.Cleanup(func() { engine.Close() })
+	t.Cleanup(func() { _ = engine.Close() })
 	return engine
 }
 

@@ -43,7 +43,7 @@ func listRemoteAccounts() error {
 	if err != nil {
 		return fmt.Errorf("connect to remote: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	accounts, err := s.ListAccounts()
 	if err != nil {
@@ -69,7 +69,7 @@ func listLocalAccounts() error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if err := s.InitSchema(); err != nil {
 		return fmt.Errorf("init schema: %w", err)
@@ -122,7 +122,7 @@ func listLocalAccounts() error {
 
 func outputAccountsTable(stats []accountStats) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tACCOUNT\tTYPE\tDISPLAY NAME\tMESSAGES\tLAST SYNC")
+	_, _ = fmt.Fprintln(w, "ID\tACCOUNT\tTYPE\tDISPLAY NAME\tMESSAGES\tLAST SYNC")
 
 	for _, s := range stats {
 		displayName := s.DisplayName
@@ -133,10 +133,10 @@ func outputAccountsTable(stats []accountStats) {
 		if s.LastSync != nil && !s.LastSync.IsZero() {
 			lastSync = s.LastSync.Format("2006-01-02 15:04")
 		}
-		fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Email, s.Type, displayName, formatCount(s.MessageCount), lastSync)
+		_, _ = fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Email, s.Type, displayName, formatCount(s.MessageCount), lastSync)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func outputAccountsJSON(stats []accountStats) error {
@@ -191,7 +191,7 @@ type accountStats struct {
 
 func outputRemoteAccountsTable(accounts []remote.AccountInfo) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "EMAIL\tSCHEDULE\tENABLED\tLAST SYNC\tNEXT SYNC")
+	_, _ = fmt.Fprintln(w, "EMAIL\tSCHEDULE\tENABLED\tLAST SYNC\tNEXT SYNC")
 
 	for _, a := range accounts {
 		enabled := "no"
@@ -210,10 +210,10 @@ func outputRemoteAccountsTable(accounts []remote.AccountInfo) {
 				nextSync = t.Format("2006-01-02 15:04")
 			}
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Email, a.Schedule, enabled, lastSync, nextSync)
+		_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", a.Email, a.Schedule, enabled, lastSync, nextSync)
 	}
 
-	w.Flush()
+	_ = w.Flush()
 }
 
 func outputRemoteAccountsJSON(accounts []remote.AccountInfo) error {

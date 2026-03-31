@@ -84,7 +84,7 @@ func TestAddMessage_UsesFirstSource(t *testing.T) {
 
 	// Also verify through the engine that the data is correctly built
 	engine := b.BuildEngine()
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	stats, err := engine.GetTotalStats(context.Background(), StatsOptions{})
 	if err != nil {
@@ -121,7 +121,7 @@ func TestBuild_EmptyAuxiliaryTables(t *testing.T) {
 	})
 
 	engine := b.BuildEngine()
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	// Should be able to query without errors.
 	stats, err := engine.GetTotalStats(context.Background(), StatsOptions{})

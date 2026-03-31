@@ -47,7 +47,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 
 		if err := s.InitSchema(); err != nil {
 			return fmt.Errorf("init schema: %w", err)
@@ -100,7 +100,7 @@ Examples:
 
 		// Create Gmail client (no rate limiter needed for single call)
 		client := gmail.NewClient(tokenSource, gmail.WithLogger(logger))
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 
 		// Run SQLite integrity check first (offline, no Gmail needed)
 		var dbCorrupt bool
@@ -267,7 +267,7 @@ func runIntegrityCheck(s *store.Store) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var errors []string
 	for rows.Next() {

@@ -115,14 +115,14 @@ func (e *tokenExporter) export(
 	baseURL := strings.TrimSuffix(remoteURL, "/")
 
 	// Upload token
-	fmt.Fprintf(e.stdout, "Uploading token to %s...\n", remoteURL)
+	_, _ = fmt.Fprintf(e.stdout, "Uploading token to %s...\n", remoteURL)
 	if parsedURL.Scheme == "http" {
-		fmt.Fprintf(e.stderr, "WARNING: Sending credentials over insecure HTTP connection\n")
+		_, _ = fmt.Fprintf(e.stderr, "WARNING: Sending credentials over insecure HTTP connection\n")
 	}
 	if err := e.uploadToken(baseURL, apiKey, email, tokenData); err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(e.stdout, "Token uploaded successfully for %s\n", email)
+	_, _ = fmt.Fprintf(e.stdout, "Token uploaded successfully for %s\n", email)
 
 	// Register account (best-effort)
 	e.addAccount(baseURL, apiKey, email)
@@ -151,7 +151,7 @@ func (e *tokenExporter) uploadToken(
 	if err != nil {
 		return fmt.Errorf("failed to connect to remote server: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated {
@@ -163,14 +163,14 @@ func (e *tokenExporter) uploadToken(
 // addAccount registers the email on the remote server. Failures are
 // logged as warnings since the token upload already succeeded.
 func (e *tokenExporter) addAccount(baseURL, apiKey, email string) {
-	fmt.Fprintf(e.stdout, "Adding account to remote config...\n")
+	_, _ = fmt.Fprintf(e.stdout, "Adding account to remote config...\n")
 	accountURL := baseURL + "/api/v1/accounts"
 	accountBody := fmt.Sprintf(
 		`{"email":%q,"schedule":"0 2 * * *","enabled":true}`, email)
 
 	req, err := http.NewRequest("POST", accountURL, strings.NewReader(accountBody))
 	if err != nil {
-		fmt.Fprintf(e.stderr, "Warning: Could not create account request: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "Warning: Could not create account request: %v\n", err)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -178,19 +178,19 @@ func (e *tokenExporter) addAccount(baseURL, apiKey, email string) {
 
 	resp, err := e.httpClient.Do(req)
 	if err != nil {
-		fmt.Fprintf(e.stderr, "Warning: Could not add account to remote config: %v\n", err)
+		_, _ = fmt.Fprintf(e.stderr, "Warning: Could not add account to remote config: %v\n", err)
 		return
 	}
 	respBody, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusCreated:
-		fmt.Fprintf(e.stdout, "Account added to remote config\n")
+		_, _ = fmt.Fprintf(e.stdout, "Account added to remote config\n")
 	case http.StatusOK:
-		fmt.Fprintf(e.stdout, "Account already configured on remote\n")
+		_, _ = fmt.Fprintf(e.stdout, "Account already configured on remote\n")
 	default:
-		fmt.Fprintf(e.stderr,
+		_, _ = fmt.Fprintf(e.stderr,
 			"Warning: Could not add account (HTTP %d): %s\n",
 			resp.StatusCode, string(respBody))
 	}

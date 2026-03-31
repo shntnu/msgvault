@@ -58,7 +58,7 @@ Examples:
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		defer s.Close()
+		defer func() { _ = s.Close() }()
 
 		if err := s.InitSchema(); err != nil {
 			return fmt.Errorf("init schema: %w", err)
@@ -224,7 +224,7 @@ func runFullSync(ctx context.Context, s *store.Store, getOAuthMgr func(string) (
 	if err != nil {
 		return err
 	}
-	defer apiClient.Close()
+	defer func() { _ = apiClient.Close() }()
 
 	// Build query from flags (Gmail only).
 	query := buildSyncQuery()

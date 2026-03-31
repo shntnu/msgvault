@@ -132,7 +132,7 @@ func (c *Client) request(ctx context.Context, op Operation, method, path string,
 		}
 
 		respBody, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if err != nil {
 			lastErr = fmt.Errorf("read response: %w", err)
 			continue

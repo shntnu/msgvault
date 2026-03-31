@@ -44,7 +44,7 @@ func openTestStore(t *testing.T) *Store {
 	if err := st.InitSchema(); err != nil {
 		t.Fatalf("InitSchema: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
+	t.Cleanup(func() { _ = st.Close() })
 	return st
 }
 

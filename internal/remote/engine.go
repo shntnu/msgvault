@@ -397,7 +397,7 @@ func (e *Engine) Aggregate(ctx context.Context, groupBy query.ViewType, opts que
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)
@@ -434,7 +434,7 @@ func (e *Engine) SubAggregate(ctx context.Context, filter query.MessageFilter, g
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)
@@ -457,7 +457,7 @@ func (e *Engine) ListMessages(ctx context.Context, filter query.MessageFilter) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)
@@ -557,7 +557,7 @@ func (e *Engine) Search(ctx context.Context, q *search.Query, limit, offset int)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)
@@ -607,7 +607,7 @@ func (e *Engine) SearchFastWithStats(ctx context.Context, q *search.Query, query
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)
@@ -670,7 +670,7 @@ func (e *Engine) GetTotalStats(ctx context.Context, opts query.StatsOptions) (*q
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != 200 {
 		return nil, handleErrorResponse(resp)

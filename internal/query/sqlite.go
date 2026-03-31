@@ -540,7 +540,7 @@ func (e *SQLiteEngine) executeAggregateQuery(ctx context.Context, query string, 
 	if err != nil {
 		return nil, fmt.Errorf("aggregate query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []AggregateRow
 	for rows.Next() {
@@ -621,7 +621,7 @@ func (e *SQLiteEngine) ListMessages(ctx context.Context, filter MessageFilter) (
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []MessageSummary
 	for rows.Next() {
@@ -718,7 +718,7 @@ func (e *SQLiteEngine) ListAccounts(ctx context.Context) ([]AccountInfo, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list accounts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var accounts []AccountInfo
 	for rows.Next() {
@@ -988,7 +988,7 @@ func (e *SQLiteEngine) GetGmailIDsByFilter(ctx context.Context, filter MessageFi
 	if err != nil {
 		return nil, fmt.Errorf("get gmail ids: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	return collectGmailIDs(rows)
 }
@@ -1216,7 +1216,7 @@ func (e *SQLiteEngine) executeSearchQuery(ctx context.Context, conditions []stri
 	if err != nil {
 		return nil, fmt.Errorf("search messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []MessageSummary
 	for rows.Next() {

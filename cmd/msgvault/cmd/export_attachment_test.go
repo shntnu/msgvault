@@ -26,15 +26,15 @@ func setupTestAttachment(t *testing.T) (string, string, []byte, func()) {
 
 	subDir := filepath.Join(tmpDir, contentHash[:2])
 	if err := os.MkdirAll(subDir, 0755); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("create subdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(subDir, contentHash), data, 0600); err != nil {
-		os.RemoveAll(tmpDir)
+		_ = os.RemoveAll(tmpDir)
 		t.Fatalf("write test file: %v", err)
 	}
 
-	return tmpDir, contentHash, data, func() { os.RemoveAll(tmpDir) }
+	return tmpDir, contentHash, data, func() { _ = os.RemoveAll(tmpDir) }
 }
 
 func TestExportAttachment_BinaryToFile(t *testing.T) {
@@ -83,7 +83,7 @@ func TestExportAttachment_JSONOutput(t *testing.T) {
 	os.Stdout = w
 
 	err := exportAttachmentAsJSON(storagePath, contentHash)
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -123,7 +123,7 @@ func TestExportAttachment_Base64Output(t *testing.T) {
 	os.Stdout = w
 
 	err := exportAttachmentAsBase64(storagePath)
-	w.Close()
+	_ = w.Close()
 	os.Stdout = oldStdout
 
 	if err != nil {
@@ -145,7 +145,7 @@ func TestExportAttachment_MissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	hash := "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	storagePath := filepath.Join(tmpDir, hash[:2], hash)

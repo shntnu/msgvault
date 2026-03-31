@@ -80,9 +80,9 @@ func openRemoteStore() (*remote.Store, error) {
 // Use this for commands that only work with local database.
 func MustBeLocal(cmdName string) error {
 	if IsRemoteMode() && !useLocal {
-		return fmt.Errorf("%s requires local database\n\n"+
-			"This command cannot run against a remote server.\n"+
-			"Use --local flag to force local database.", cmdName)
+		return fmt.Errorf("%s requires local database, "+
+			"this command cannot run against a remote server, "+
+			"use --local flag to force local database", cmdName)
 	}
 	return nil
 }

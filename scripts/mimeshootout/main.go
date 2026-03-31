@@ -97,7 +97,7 @@ func main() {
 		logger.Error("failed to open database", "error", err, "path", dbPath)
 		os.Exit(1)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Get messages with raw MIME data
 	messages, err := loadMessages(db, limit)
@@ -306,7 +306,7 @@ func loadMessages(db *sql.DB, limit int) ([]PythonMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query messages: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var messages []PythonMessage
 	for rows.Next() {
@@ -340,7 +340,7 @@ func loadParticipants(db *sql.DB, messageID int64, recipientType string) ([]Addr
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var addresses []Address
 	for rows.Next() {
@@ -372,7 +372,7 @@ func loadRawMime(db *sql.DB, messageID int64) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("zlib reader: %w", err)
 		}
-		defer r.Close()
+		defer func() { _ = r.Close() }()
 
 		return io.ReadAll(r)
 	}

@@ -58,7 +58,7 @@ func ResolveAccounts(dbPath string, guids []string) (map[string]AccountInfo, err
 	if err != nil {
 		return nil, fmt.Errorf("open accounts db: %w", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	// Build placeholders for IN clause.
 	placeholders := make([]string, len(guids))
@@ -82,7 +82,7 @@ func ResolveAccounts(dbPath string, guids []string) (map[string]AccountInfo, err
 	if err != nil {
 		return nil, fmt.Errorf("query accounts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	result := make(map[string]AccountInfo)
 	for rows.Next() {

@@ -77,7 +77,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	if err := s.InitSchema(); err != nil {
 		return fmt.Errorf("init schema: %w", err)
@@ -109,7 +109,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 		}
 		engine = query.NewSQLiteEngine(s.DB())
 	}
-	defer engine.Close()
+	defer func() { _ = engine.Close() }()
 
 	getOAuthMgr := oauthManagerCache()
 
@@ -302,7 +302,7 @@ func runScheduledSync(ctx context.Context, email string, s *store.Store, getOAut
 		gmail.WithLogger(logger),
 		gmail.WithRateLimiter(rateLimiter),
 	)
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	// Set up sync options
 	opts := sync.DefaultOptions()

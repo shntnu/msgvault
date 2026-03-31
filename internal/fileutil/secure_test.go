@@ -129,7 +129,7 @@ func TestSecureOpenFile(t *testing.T) {
 				t.Fatalf("SecureOpenFile: %v", err)
 			}
 			if _, err := f.Write([]byte("data")); err != nil {
-				f.Close()
+				_ = f.Close()
 				t.Fatalf("Write: %v", err)
 			}
 			if err := f.Close(); err != nil {
@@ -172,7 +172,7 @@ func TestSecureOpenFile_ReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SecureOpenFile read-only: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	buf := make([]byte, 100)
 	n, err := f.Read(buf)

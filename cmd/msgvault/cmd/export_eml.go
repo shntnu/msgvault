@@ -89,7 +89,7 @@ func runExportEML(cmd *cobra.Command, messageRef, outputPath string) error {
 	if err != nil {
 		return fmt.Errorf("open database: %w", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 
 	engine := query.NewSQLiteEngine(s.DB())
 

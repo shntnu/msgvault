@@ -334,7 +334,7 @@ func TestExportAttachments_PartialSuccess(t *testing.T) {
 
 	// Clean up the zip file that gets created in current directory.
 	// TODO: ExportAttachments should write to a configurable output directory.
-	t.Cleanup(func() { os.Remove("Test_1.zip") })
+	t.Cleanup(func() { _ = os.Remove("Test_1.zip") })
 
 	// Create a valid attachment file (must be valid 64-char hex SHA-256 hash)
 	validHash := "abc123def456abc123def456abc123def456abc123def456abc123def456abc1"
@@ -386,7 +386,7 @@ func TestExportAttachments_FullSuccess(t *testing.T) {
 
 	// Clean up the zip file that gets created in current directory.
 	// TODO: ExportAttachments should write to a configurable output directory.
-	t.Cleanup(func() { os.Remove("Test_1.zip") })
+	t.Cleanup(func() { _ = os.Remove("Test_1.zip") })
 
 	// Create a valid attachment file (must be valid 64-char hex SHA-256 hash)
 	validHash := "abc123def456abc123def456abc123def456abc123def456abc123def456abc1"
