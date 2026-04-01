@@ -417,6 +417,8 @@ func (e *DuckDBEngine) buildAggregateSearchConditions(searchQuery string, keyCol
 		var parts []string
 		parts = append(parts, `msg.subject ILIKE ? ESCAPE '\'`)
 		args = append(args, termPattern)
+		parts = append(parts, `COALESCE(msg.snippet, '') ILIKE ? ESCAPE '\'`)
+		args = append(args, termPattern)
 		parts = append(parts, `EXISTS (
 			SELECT 1 FROM mr mr_search
 			JOIN p p_search ON p_search.id = mr_search.participant_id
@@ -2330,17 +2332,18 @@ func (e *DuckDBEngine) buildSearchConditions(q *search.Query, filter MessageFilt
 		args = append(args, filter.TimeRange.Period)
 	}
 
-	// Text search terms - search subject and from fields only (fast path)
+	// Text search terms - search subject, snippet, and sender fields (fast path)
 	if len(q.TextTerms) > 0 {
 		for _, term := range q.TextTerms {
 			termPattern := "%" + escapeILIKE(term) + "%"
 			conditions = append(conditions, `(
 				msg.subject ILIKE ? ESCAPE '\' OR
+				COALESCE(msg.snippet, '') ILIKE ? ESCAPE '\' OR
 				COALESCE(ms.from_email, ds.from_email, '') ILIKE ? ESCAPE '\' OR
 				COALESCE(ms.from_name, ds.from_name, '') ILIKE ? ESCAPE '\' OR
 				COALESCE(ms.from_phone, ds.from_phone, '') ILIKE ? ESCAPE '\'
 			)`)
-			args = append(args, termPattern, termPattern, termPattern, termPattern)
+			args = append(args, termPattern, termPattern, termPattern, termPattern, termPattern)
 		}
 	}
 

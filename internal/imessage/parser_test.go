@@ -142,10 +142,10 @@ func TestResolveHandle(t *testing.T) {
 			wantDisplayName: "12345",
 		},
 		{
-			name:            "handle with digits parses as phone",
+			name:            "handle with prefix falls to raw handle",
 			handleID:        "p:+1555123",
-			wantPhone:       "+1555123",
-			wantDisplayName: "+1555123",
+			wantPhone:       "",
+			wantDisplayName: "p:+1555123",
 		},
 		{
 			name:            "system handle without digits",

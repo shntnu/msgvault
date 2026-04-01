@@ -381,11 +381,15 @@ func (imp *Importer) Import(ctx context.Context, waDBPath string, opts ImportOpt
 						size = int(media.FileSize.Int64)
 					}
 
-					// Use UpsertAttachment — it handles dedup by content_hash.
-					err := imp.store.UpsertAttachment(messageID, filename, mimeType, storagePath, contentHash, size)
-					if err != nil {
-						summary.Errors++
-						imp.progress.OnError(fmt.Errorf("upsert attachment for message %s: %w", waMsg.KeyID, err))
+					// Only insert attachment row when we have actual content.
+					// Without --media-dir, storagePath and contentHash are both
+					// empty; inserting would create broken records.
+					if storagePath != "" || contentHash != "" {
+						err := imp.store.UpsertAttachment(messageID, filename, mimeType, storagePath, contentHash, size)
+						if err != nil {
+							summary.Errors++
+							imp.progress.OnError(fmt.Errorf("upsert attachment for message %s: %w", waMsg.KeyID, err))
+						}
 					}
 
 					// Store media metadata in the attachments table is done above.
