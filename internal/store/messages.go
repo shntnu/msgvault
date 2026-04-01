@@ -853,7 +853,11 @@ func (s *Store) backfillFTSBatch(fromID, toID int64) (int64, error) {
 	result, err := s.db.Exec(`
 		INSERT OR REPLACE INTO messages_fts (rowid, message_id, subject, body, from_addr, to_addr, cc_addr)
 		SELECT m.id, m.id, COALESCE(m.subject, ''), COALESCE(mb.body_text, ''),
-			COALESCE((SELECT GROUP_CONCAT(p.email_address, ' ') FROM message_recipients mr JOIN participants p ON p.id = mr.participant_id WHERE mr.message_id = m.id AND mr.recipient_type = 'from'), ''),
+			COALESCE(
+				(SELECT COALESCE(p.phone_number, p.email_address) FROM participants p WHERE p.id = m.sender_id),
+				(SELECT GROUP_CONCAT(p.email_address, ' ') FROM message_recipients mr JOIN participants p ON p.id = mr.participant_id WHERE mr.message_id = m.id AND mr.recipient_type = 'from'),
+				''
+			),
 			COALESCE((SELECT GROUP_CONCAT(p.email_address, ' ') FROM message_recipients mr JOIN participants p ON p.id = mr.participant_id WHERE mr.message_id = m.id AND mr.recipient_type = 'to'), ''),
 			COALESCE((SELECT GROUP_CONCAT(p.email_address, ' ') FROM message_recipients mr JOIN participants p ON p.id = mr.participant_id WHERE mr.message_id = m.id AND mr.recipient_type = 'cc'), '')
 		FROM messages m
