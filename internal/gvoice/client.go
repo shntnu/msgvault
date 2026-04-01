@@ -270,6 +270,16 @@ func (c *Client) importTextEntry(
 		return 0, fmt.Errorf("resolve sender: %w", err)
 	}
 
+	// For direct chats, resolve the other party (the non-Me participant).
+	// For outbound messages msg.SenderPhone is the owner's number, so
+	// senderID == ownerID and cannot be used as the "to" recipient.
+	contactID := senderID
+	if entry.FileType == fileTypeText && msg.IsMe {
+		contactID = c.resolveContactID(
+			s, messages, phoneCache, summary,
+		)
+	}
+
 	// Ensure conversation participant
 	if senderID > 0 {
 		_ = s.EnsureConversationParticipant(convID, senderID, "member")
@@ -343,7 +353,7 @@ func (c *Client) importTextEntry(
 
 	// Write message_recipients
 	if err := c.writeTextRecipients(
-		s, msgID, msg, ownerID, senderID, entry.FileType,
+		s, msgID, msg, ownerID, senderID, contactID, entry.FileType,
 		groupParticipants, phoneCache, summary,
 	); err != nil {
 		return 0, fmt.Errorf("write message recipients: %w", err)
@@ -514,11 +524,13 @@ func (c *Client) importCallEntry(
 
 // writeTextRecipients writes from/to rows for a text message.
 // IsMe=true: from=owner, to=contact(s). IsMe=false: from=sender, to=owner.
+// contactID is the other party in a direct chat (may differ from senderID
+// for outbound messages where senderID == ownerID).
 func (c *Client) writeTextRecipients(
 	s *store.Store,
 	msgID int64,
 	msg textMessage,
-	ownerID, senderID int64,
+	ownerID, senderID, contactID int64,
 	ft fileType,
 	groupParticipants []string,
 	phoneCache map[string]int64,
@@ -533,9 +545,10 @@ func (c *Client) writeTextRecipients(
 				return err
 			}
 		}
-		// To: group participants or the contact
+		// To: group participants or the contact (not the sender, who is
+		// the owner for outbound messages)
 		toIDs := c.collectRecipientIDs(
-			s, ft, senderID, groupParticipants,
+			s, ft, contactID, groupParticipants,
 			phoneCache, summary,
 		)
 		if len(toIDs) > 0 {
@@ -593,6 +606,29 @@ func (c *Client) collectRecipientIDs(
 		return []int64{contactID}
 	}
 	return nil
+}
+
+// resolveContactID finds the non-Me participant in a direct chat's message
+// list and returns their participant ID. Returns 0 if no non-Me sender is
+// found (e.g., a file containing only outbound messages with no replies).
+func (c *Client) resolveContactID(
+	s *store.Store,
+	messages []textMessage,
+	phoneCache map[string]int64,
+	summary *ImportSummary,
+) int64 {
+	for _, m := range messages {
+		if !m.IsMe && m.SenderPhone != "" {
+			pid, err := c.resolveParticipant(
+				s, m.SenderPhone, m.SenderName,
+				phoneCache, summary,
+			)
+			if err == nil && pid > 0 {
+				return pid
+			}
+		}
+	}
+	return 0
 }
 
 // writeCallRecipients writes from/to rows for a call record.
