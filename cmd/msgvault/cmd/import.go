@@ -213,7 +213,35 @@ func (p *ImportCLIProgress) OnError(err error) {
 	fmt.Printf("\nWarning: %s\n", textutil.SanitizeTerminal(err.Error()))
 }
 
+// Deprecated: "import --type whatsapp" forwards to "import-whatsapp".
+// Remove after one release cycle.
+var importType string
+
+var importCmd = &cobra.Command{
+	Use:        "import [path]",
+	Short:      "Import messages (deprecated: use import-whatsapp)",
+	Deprecated: "use import-whatsapp instead",
+	Hidden:     true,
+	Args:       cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if err := MustBeLocal("import"); err != nil {
+			return err
+		}
+		if strings.ToLower(importType) != "whatsapp" {
+			return fmt.Errorf(
+				"unsupported import type %q; use import-whatsapp",
+				importType,
+			)
+		}
+		fmt.Fprintln(os.Stderr,
+			"Warning: 'import --type whatsapp' is deprecated."+
+				" Use 'import-whatsapp' instead.")
+		return runWhatsAppImport(cmd, args[0])
+	},
+}
+
 func init() {
+	// import-whatsapp (canonical)
 	importWhatsappCmd.Flags().StringVar(&importPhone, "phone", "", "your phone number in E.164 format (required)")
 	importWhatsappCmd.Flags().StringVar(&importMediaDir, "media-dir", "", "path to decrypted Media folder (optional)")
 	importWhatsappCmd.Flags().StringVar(&importContacts, "contacts", "", "path to contacts .vcf file for name resolution (optional)")
@@ -221,4 +249,13 @@ func init() {
 	importWhatsappCmd.Flags().StringVar(&importDisplayName, "display-name", "", "display name for the phone owner")
 	_ = importWhatsappCmd.MarkFlagRequired("phone")
 	rootCmd.AddCommand(importWhatsappCmd)
+
+	// Deprecated "import --type whatsapp" alias
+	importCmd.Flags().StringVar(&importType, "type", "", "import source type")
+	importCmd.Flags().StringVar(&importPhone, "phone", "", "your phone number in E.164 format")
+	importCmd.Flags().StringVar(&importMediaDir, "media-dir", "", "path to decrypted Media folder")
+	importCmd.Flags().StringVar(&importContacts, "contacts", "", "path to contacts .vcf file")
+	importCmd.Flags().IntVar(&importLimit, "limit", 0, "limit number of messages")
+	importCmd.Flags().StringVar(&importDisplayName, "display-name", "", "display name for the phone owner")
+	rootCmd.AddCommand(importCmd)
 }

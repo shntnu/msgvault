@@ -267,7 +267,7 @@ func (m Model) textAggregateView() string {
 	}
 
 	// Sort indicators
-	sortInd := func(field query.SortField) string {
+	sortInd := func(field query.TextSortField) string {
 		if m.textState.filter.SortField == field {
 			if m.textState.filter.SortDirection == query.SortDesc {
 				return "\u2193"
@@ -278,17 +278,15 @@ func (m Model) textAggregateView() string {
 	}
 
 	viewLabel := m.textState.viewType.String()
-	if si := sortInd(query.SortByName); si != "" {
+	if si := sortInd(query.TextSortByName); si != "" {
 		viewLabel += si
 	}
 	countLabel := "Count"
-	if si := sortInd(query.SortByCount); si != "" {
+	if si := sortInd(query.TextSortByCount); si != "" {
 		countLabel += si
 	}
 	sizeLabel := "Size"
-	if si := sortInd(query.SortBySize); si != "" {
-		sizeLabel += si
-	}
+	_ = sizeLabel // TextSortField has no size variant; label kept for column layout
 	attachLabel := "Attchs"
 
 	headerRow := fmt.Sprintf(

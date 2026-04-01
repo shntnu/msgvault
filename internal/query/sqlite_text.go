@@ -61,10 +61,6 @@ func buildSQLiteTextFilterConditions(filter TextFilter) (string, []interface{}) 
 		conditions = append(conditions, "m.source_id = ?")
 		args = append(args, *filter.SourceID)
 	}
-	if filter.ConversationID != nil {
-		conditions = append(conditions, "m.conversation_id = ?")
-		args = append(args, *filter.ConversationID)
-	}
 	if filter.ContactPhone != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM participants p_cp
@@ -146,21 +142,20 @@ func (e *SQLiteEngine) ListConversations(
 ) ([]ConversationRow, error) {
 	where, args := buildSQLiteTextFilterConditions(filter)
 
-	orderBy := "last_message_at DESC"
-	if filter.SortField != 0 {
-		switch filter.SortField {
-		case SortByCount:
-			orderBy = "message_count"
-		case SortBySize:
-			orderBy = "total_size"
-		case SortByName:
-			orderBy = "title"
-		}
-		if filter.SortDirection == SortAsc {
-			orderBy += " ASC"
-		} else {
-			orderBy += " DESC"
-		}
+	// Sort clause.
+	var orderBy string
+	switch filter.SortField {
+	case TextSortByCount:
+		orderBy = "message_count"
+	case TextSortByName:
+		orderBy = "title"
+	default: // TextSortByLastMessage
+		orderBy = "last_message_at"
+	}
+	if filter.SortDirection == SortAsc {
+		orderBy += " ASC"
+	} else {
+		orderBy += " DESC"
 	}
 
 	limit := filter.Pagination.Limit
@@ -318,7 +313,7 @@ func (e *SQLiteEngine) TextAggregate(
 	}
 
 	aggOpts := AggregateOptions{
-		SortField:       opts.SortField,
+		SortField:       textSortFieldToSortField(opts.SortField),
 		SortDirection:   opts.SortDirection,
 		Limit:           opts.Limit,
 		TimeGranularity: opts.TimeGranularity,
@@ -345,8 +340,9 @@ func (e *SQLiteEngine) TextAggregate(
 func (e *SQLiteEngine) ListConversationMessages(
 	ctx context.Context, convID int64, filter TextFilter,
 ) ([]MessageSummary, error) {
-	filter.ConversationID = &convID
 	where, args := buildSQLiteTextFilterConditions(filter)
+	where += " AND m.conversation_id = ?"
+	args = append(args, convID)
 
 	limit := filter.Pagination.Limit
 	if limit == 0 {

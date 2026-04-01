@@ -97,7 +97,7 @@ func TestIntegration(t *testing.T) {
 			SentAt:          sql.NullTime{Time: m.sentAt, Valid: true},
 			IsFromMe:        m.fromMe,
 			SizeEstimate:    int64(len(m.snippet)),
-			SenderID:        sql.NullInt64{Int64: phoneParticipantID, Valid: !m.fromMe},
+			SenderID:        sql.NullInt64{Int64: phoneParticipantID, Valid: true},
 		}
 		msgID, err := s.UpsertMessage(msg)
 		if err != nil {

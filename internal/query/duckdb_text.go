@@ -27,10 +27,6 @@ func (e *DuckDBEngine) buildTextFilterConditions(
 		conditions = append(conditions, "msg.source_id = ?")
 		args = append(args, *filter.SourceID)
 	}
-	if filter.ConversationID != nil {
-		conditions = append(conditions, "msg.conversation_id = ?")
-		args = append(args, *filter.ConversationID)
-	}
 	if filter.ContactPhone != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM p p_filter
@@ -101,23 +97,20 @@ func (e *DuckDBEngine) ListConversations(
 ) ([]ConversationRow, error) {
 	where, args := e.buildTextFilterConditions(filter)
 
-	// Sort clause: default to last_message_at DESC for conversations,
-	// since the zero value of SortField (SortByCount) is not meaningful here.
-	orderBy := "last_message_at DESC"
-	if filter.SortField != 0 {
-		switch filter.SortField {
-		case SortByCount:
-			orderBy = "message_count"
-		case SortBySize:
-			orderBy = "total_size"
-		case SortByName:
-			orderBy = "title"
-		}
-		if filter.SortDirection == SortAsc {
-			orderBy += " ASC"
-		} else {
-			orderBy += " DESC"
-		}
+	// Sort clause.
+	var orderBy string
+	switch filter.SortField {
+	case TextSortByCount:
+		orderBy = "message_count"
+	case TextSortByName:
+		orderBy = "title"
+	default: // TextSortByLastMessage
+		orderBy = "last_message_at"
+	}
+	if filter.SortDirection == SortAsc {
+		orderBy += " ASC"
+	} else {
+		orderBy += " DESC"
 	}
 
 	limit := filter.Pagination.Limit
@@ -276,7 +269,7 @@ func (e *DuckDBEngine) TextAggregate(
 	whereClause := strings.Join(conditions, " AND ")
 
 	aggOpts := AggregateOptions{
-		SortField:       opts.SortField,
+		SortField:       textSortFieldToSortField(opts.SortField),
 		SortDirection:   opts.SortDirection,
 		Limit:           opts.Limit,
 		TimeGranularity: opts.TimeGranularity,
@@ -290,8 +283,9 @@ func (e *DuckDBEngine) TextAggregate(
 func (e *DuckDBEngine) ListConversationMessages(
 	ctx context.Context, convID int64, filter TextFilter,
 ) ([]MessageSummary, error) {
-	filter.ConversationID = &convID
 	where, args := e.buildTextFilterConditions(filter)
+	where += " AND msg.conversation_id = ?"
+	args = append(args, convID)
 
 	limit := filter.Pagination.Limit
 	if limit == 0 {
