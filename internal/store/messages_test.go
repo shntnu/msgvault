@@ -1,10 +1,96 @@
 package store_test
 
 import (
+	"database/sql"
 	"testing"
+	"time"
 
+	"github.com/wesm/msgvault/internal/store"
 	"github.com/wesm/msgvault/internal/testutil"
 )
+
+func TestRecomputeConversationStats(t *testing.T) {
+	st := testutil.NewTestStore(t)
+
+	source, err := st.GetOrCreateSource("whatsapp", "+15550000001")
+	if err != nil {
+		t.Fatalf("GetOrCreateSource: %v", err)
+	}
+
+	convID, err := st.EnsureConversationWithType(source.ID, "conv-1", "whatsapp_dm", "Test Chat")
+	if err != nil {
+		t.Fatalf("EnsureConversationWithType: %v", err)
+	}
+
+	// Verify initial message_count is 0 (stats not maintained on insert).
+	var initialCount int
+	if err := st.DB().QueryRow(
+		`SELECT message_count FROM conversations WHERE id = ?`, convID,
+	).Scan(&initialCount); err != nil {
+		t.Fatalf("initial message_count scan: %v", err)
+	}
+	if initialCount != 0 {
+		t.Errorf("initial message_count = %d, want 0", initialCount)
+	}
+
+	sentAt := time.Date(2024, 1, 15, 10, 0, 0, 0, time.UTC)
+	msg1 := &store.Message{
+		SourceID:        source.ID,
+		SourceMessageID: "msg-1",
+		ConversationID:  convID,
+		MessageType:     "whatsapp",
+		SentAt:          sql.NullTime{Time: sentAt, Valid: true},
+		Snippet:         sql.NullString{String: "hello", Valid: true},
+	}
+	if _, err := st.UpsertMessage(msg1); err != nil {
+		t.Fatalf("UpsertMessage msg1: %v", err)
+	}
+
+	sentAt2 := sentAt.Add(time.Hour)
+	msg2 := &store.Message{
+		SourceID:        source.ID,
+		SourceMessageID: "msg-2",
+		ConversationID:  convID,
+		MessageType:     "whatsapp",
+		SentAt:          sql.NullTime{Time: sentAt2, Valid: true},
+		Snippet:         sql.NullString{String: "world", Valid: true},
+	}
+	if _, err := st.UpsertMessage(msg2); err != nil {
+		t.Fatalf("UpsertMessage msg2: %v", err)
+	}
+
+	// Recompute and verify counts.
+	if err := st.RecomputeConversationStats(source.ID); err != nil {
+		t.Fatalf("RecomputeConversationStats: %v", err)
+	}
+
+	var count int
+	var lastMsgAt sql.NullTime
+	if err := st.DB().QueryRow(
+		`SELECT message_count, last_message_at FROM conversations WHERE id = ?`, convID,
+	).Scan(&count, &lastMsgAt); err != nil {
+		t.Fatalf("post-recompute scan: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("message_count = %d, want 2", count)
+	}
+	if !lastMsgAt.Valid {
+		t.Error("last_message_at is NULL, want a timestamp")
+	}
+
+	// Idempotency: calling again should produce the same result.
+	if err := st.RecomputeConversationStats(source.ID); err != nil {
+		t.Fatalf("RecomputeConversationStats (second call): %v", err)
+	}
+	if err := st.DB().QueryRow(
+		`SELECT message_count FROM conversations WHERE id = ?`, convID,
+	).Scan(&count); err != nil {
+		t.Fatalf("idempotency scan: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("idempotency: message_count = %d, want 2", count)
+	}
+}
 
 func TestEnsureParticipantByPhone_IdentifierType(t *testing.T) {
 	st := testutil.NewTestStore(t)

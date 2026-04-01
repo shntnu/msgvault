@@ -860,6 +860,40 @@ func (s *Store) backfillFTSBatch(fromID, toID int64) (int64, error) {
 	return result.RowsAffected()
 }
 
+// RecomputeConversationStats updates the denormalized stats columns on all conversations
+// belonging to the given source. It recomputes message_count, participant_count,
+// last_message_at, and last_message_preview from the current table state.
+// Safe to call multiple times — always produces the same result (idempotent).
+func (s *Store) RecomputeConversationStats(sourceID int64) error {
+	_, err := s.db.Exec(`
+		UPDATE conversations SET
+			message_count = (
+				SELECT COUNT(*) FROM messages
+				WHERE conversation_id = conversations.id
+			),
+			participant_count = (
+				SELECT COUNT(*) FROM conversation_participants
+				WHERE conversation_id = conversations.id
+			),
+			last_message_at = (
+				SELECT MAX(COALESCE(sent_at, received_at, internal_date))
+				FROM messages
+				WHERE conversation_id = conversations.id
+			),
+			last_message_preview = (
+				SELECT snippet FROM messages
+				WHERE conversation_id = conversations.id
+				ORDER BY COALESCE(sent_at, received_at, internal_date) DESC
+				LIMIT 1
+			)
+		WHERE source_id = ?
+	`, sourceID)
+	if err != nil {
+		return fmt.Errorf("recompute conversation stats: %w", err)
+	}
+	return nil
+}
+
 // EnsureConversationWithType gets or creates a conversation with an explicit conversation_type.
 // Unlike EnsureConversation (which hardcodes 'email_thread'), this accepts the type as a parameter,
 // making it suitable for WhatsApp and other messaging platforms.

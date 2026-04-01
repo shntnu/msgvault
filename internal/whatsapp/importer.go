@@ -495,23 +495,9 @@ func (imp *Importer) Import(ctx context.Context, waDBPath string, opts ImportOpt
 	}
 
 	// Update denormalised conversation counts for the WhatsApp source.
-	_, _ = imp.store.DB().Exec(`
-		UPDATE conversations SET
-			message_count = (
-				SELECT COUNT(*) FROM messages
-				WHERE conversation_id = conversations.id
-			),
-			participant_count = (
-				SELECT COUNT(*) FROM conversation_participants
-				WHERE conversation_id = conversations.id
-			),
-			last_message_at = (
-				SELECT MAX(COALESCE(sent_at, received_at, internal_date))
-				FROM messages
-				WHERE conversation_id = conversations.id
-			)
-		WHERE source_id = ?
-	`, source.ID)
+	if err := imp.store.RecomputeConversationStats(source.ID); err != nil {
+		imp.progress.OnError(fmt.Errorf("recompute conversation stats: %w", err))
+	}
 
 	summary.Duration = time.Since(startTime)
 	imp.progress.OnComplete(summary)
