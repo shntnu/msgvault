@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	importType        string
 	importPhone       string
 	importMediaDir    string
 	importContacts    string
@@ -24,41 +23,30 @@ var (
 	importDisplayName string
 )
 
-var importCmd = &cobra.Command{
-	Use:   "import [path]",
-	Short: "Import messages from external sources",
-	Long: `Import messages from external message databases.
-
-Currently supported types:
-  whatsapp    Import from a decrypted WhatsApp msgstore.db
+var importWhatsappCmd = &cobra.Command{
+	Use:   "import-whatsapp <msgstore.db>",
+	Short: "Import WhatsApp messages from decrypted backup",
+	Long: `Import messages from a decrypted WhatsApp msgstore.db backup.
 
 Examples:
-  msgvault import --type whatsapp --phone "+447700900000" /path/to/msgstore.db
-  msgvault import --type whatsapp --phone "+447700900000" --contacts ~/contacts.vcf /path/to/msgstore.db
-  msgvault import --type whatsapp --phone "+447700900000" --media-dir /path/to/Media /path/to/msgstore.db`,
+  msgvault import-whatsapp --phone "+447700900000" /path/to/msgstore.db
+  msgvault import-whatsapp --phone "+447700900000" --contacts ~/contacts.vcf /path/to/msgstore.db
+  msgvault import-whatsapp --phone "+447700900000" --media-dir /path/to/Media /path/to/msgstore.db`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if err := MustBeLocal("import"); err != nil {
+		if err := MustBeLocal("import-whatsapp"); err != nil {
 			return err
 		}
-
-		sourcePath := args[0]
-
-		// Validate source file exists.
-		if _, err := os.Stat(sourcePath); err != nil {
-			return fmt.Errorf("source file not found: %w", err)
-		}
-
-		switch strings.ToLower(importType) {
-		case "whatsapp":
-			return runWhatsAppImport(cmd, sourcePath)
-		default:
-			return fmt.Errorf("unsupported import type %q (supported: whatsapp)", importType)
-		}
+		return runWhatsAppImport(cmd, args[0])
 	},
 }
 
 func runWhatsAppImport(cmd *cobra.Command, sourcePath string) error {
+	// Validate source file exists.
+	if _, err := os.Stat(sourcePath); err != nil {
+		return fmt.Errorf("source file not found: %w", err)
+	}
+
 	// Validate phone number.
 	if importPhone == "" {
 		return fmt.Errorf("--phone is required for WhatsApp import (E.164 format, e.g., +447700900000)")
@@ -226,12 +214,11 @@ func (p *ImportCLIProgress) OnError(err error) {
 }
 
 func init() {
-	importCmd.Flags().StringVar(&importType, "type", "", "import source type (required: whatsapp)")
-	importCmd.Flags().StringVar(&importPhone, "phone", "", "your phone number in E.164 format (required for whatsapp)")
-	importCmd.Flags().StringVar(&importMediaDir, "media-dir", "", "path to decrypted Media folder (optional)")
-	importCmd.Flags().StringVar(&importContacts, "contacts", "", "path to contacts .vcf file for name resolution (optional)")
-	importCmd.Flags().IntVar(&importLimit, "limit", 0, "limit number of messages (for testing)")
-	importCmd.Flags().StringVar(&importDisplayName, "display-name", "", "display name for the phone owner")
-	_ = importCmd.MarkFlagRequired("type")
-	rootCmd.AddCommand(importCmd)
+	importWhatsappCmd.Flags().StringVar(&importPhone, "phone", "", "your phone number in E.164 format (required)")
+	importWhatsappCmd.Flags().StringVar(&importMediaDir, "media-dir", "", "path to decrypted Media folder (optional)")
+	importWhatsappCmd.Flags().StringVar(&importContacts, "contacts", "", "path to contacts .vcf file for name resolution (optional)")
+	importWhatsappCmd.Flags().IntVar(&importLimit, "limit", 0, "limit number of messages (for testing)")
+	importWhatsappCmd.Flags().StringVar(&importDisplayName, "display-name", "", "display name for the phone owner")
+	_ = importWhatsappCmd.MarkFlagRequired("phone")
+	rootCmd.AddCommand(importWhatsappCmd)
 }
