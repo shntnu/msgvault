@@ -682,7 +682,7 @@ func setupSQLiteSource(duckDB *sql.DB, dbPath string) (cleanup func(), err error
 		{"participants", "SELECT id, email_address, domain, display_name, phone_number FROM participants", ""},
 		{"labels", "SELECT id, name FROM labels", ""},
 		{"sources", "SELECT id, identifier, source_type FROM sources", ""},
-		{"conversations", "SELECT id, source_conversation_id, title FROM conversations", ""},
+		{"conversations", "SELECT id, source_conversation_id, title, COALESCE(conversation_type, 'email_thread') AS conversation_type FROM conversations", ""},
 	}
 
 	for _, t := range tables {

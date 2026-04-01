@@ -1080,6 +1080,9 @@ func (e *DuckDBEngine) GetTotalStats(ctx context.Context, opts StatsOptions) (*T
 	var conditions []string
 	var args []interface{}
 
+	// Restrict to email messages only; NULL and '' handle pre-message_type data.
+	conditions = append(conditions, emailOnlyFilterMsg)
+
 	if opts.SourceID != nil {
 		conditions = append(conditions, "msg.source_id = ?")
 		args = append(args, *opts.SourceID)
@@ -2266,6 +2269,9 @@ func (e *DuckDBEngine) SearchFastWithStats(ctx context.Context, q *search.Query,
 func (e *DuckDBEngine) buildSearchConditions(q *search.Query, filter MessageFilter) ([]string, []interface{}) {
 	var conditions []string
 	var args []interface{}
+
+	// Restrict to email messages only; NULL and '' handle pre-message_type data.
+	conditions = append(conditions, emailOnlyFilterMsg)
 
 	// Apply basic filter conditions (ignoring join flags for search - we handle those differently)
 	if filter.SourceID != nil {

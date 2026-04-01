@@ -780,6 +780,8 @@ func (e *SQLiteEngine) GetTotalStats(ctx context.Context, opts StatsOptions) (*T
 	// the messages table for compatibility with search joins.
 	var conditions []string
 	var args []interface{}
+	// Restrict to email messages only; NULL and '' handle pre-message_type data.
+	conditions = append(conditions, emailOnlyFilterM)
 	// Include all messages (deleted messages shown with indicator in TUI)
 	if opts.SourceID != nil {
 		conditions = append(conditions, "m.source_id = ?")
@@ -1036,7 +1038,8 @@ func (e *SQLiteEngine) GetGmailIDsByFilter(ctx context.Context, filter MessageFi
 // buildSearchQueryParts builds the WHERE conditions, args, joins, and FTS join
 // for a search query. This is shared between Search and SearchFastCount.
 func (e *SQLiteEngine) buildSearchQueryParts(ctx context.Context, q *search.Query) (conditions []string, args []interface{}, joins []string, ftsJoin string) {
-	// Include all messages (deleted messages shown with indicator in TUI)
+	// Restrict to email messages only; NULL and '' handle pre-message_type data.
+	conditions = append(conditions, emailOnlyFilterM)
 
 	// From filter - uses EXISTS to avoid join multiplication in aggregates.
 	// Handles both exact addresses and @domain patterns.
