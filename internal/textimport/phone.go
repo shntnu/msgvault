@@ -10,6 +10,7 @@ import (
 // Returns an error for inputs that are not phone numbers (emails,
 // short codes, system identifiers).
 func NormalizePhone(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", fmt.Errorf("empty input")
 	}
@@ -39,9 +40,6 @@ func NormalizePhone(raw string) (string, error) {
 	if justDigits == "" {
 		return "", fmt.Errorf("no digits in input: %q", raw)
 	}
-	if len(justDigits) < 7 {
-		return "", fmt.Errorf("too short for phone number: %q", raw)
-	}
 
 	var digits string
 	if leadingPlus {
@@ -58,8 +56,13 @@ func NormalizePhone(raw string) (string, error) {
 		digits = "+" + justDigits
 	}
 
+	// Validate length against the final normalized digit string.
+	finalDigits := digits[1:] // strip leading '+'
+	if len(finalDigits) < 7 {
+		return "", fmt.Errorf("too short for phone number: %q", raw)
+	}
 	// E.164 max is 15 digits (country code + subscriber)
-	if len(digits)-1 > 15 {
+	if len(finalDigits) > 15 {
 		return "", fmt.Errorf("too long for E.164 (max 15 digits): %q", raw)
 	}
 

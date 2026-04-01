@@ -30,6 +30,11 @@ func TestNormalizePhone(t *testing.T) {
 		{"status@broadcast", "", true},
 		// International 00-prefix
 		{"0033624921221", "+33624921221", false},
+		// Leading whitespace
+		{" +15551234567", "+15551234567", false},
+		{"\t+44 7700 900000", "+447700900000", false},
+		// 00-prefix too short after conversion
+		{"0012345", "", true},
 		// Trunk prefix (0)
 		{"+44 (0)7700 900000", "+447700900000", false},
 		// Embedded + (invalid)
