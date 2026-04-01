@@ -330,7 +330,9 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// ListConversationMessages — returns messages for conv1 in chronological order.
-	messages, err := te.ListConversationMessages(ctx, conv1ID, query.TextFilter{})
+	messages, err := te.ListConversationMessages(ctx, conv1ID, query.TextFilter{
+		SortDirection: query.SortAsc,
+	})
 	if err != nil {
 		t.Fatalf("ListConversationMessages(conv1): %v", err)
 	}

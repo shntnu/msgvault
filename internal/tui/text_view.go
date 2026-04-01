@@ -85,9 +85,11 @@ func (m Model) textBreadcrumb() string {
 			textDrillKey(m),
 		)
 	case textLevelTimeline:
-		return fmt.Sprintf(
-			"Timeline (conv %d)", m.textState.selectedConvID,
-		)
+		order := "\u2191 oldest first"
+		if m.textState.filter.SortDirection == query.SortDesc {
+			order = "\u2193 newest first"
+		}
+		return fmt.Sprintf("Timeline %s", order)
 	}
 	return ""
 }
@@ -461,7 +463,12 @@ func (m Model) textTimelineView() string {
 			from = "Unknown"
 		}
 		timeStr := msg.SentAt.Format("2006-01-02 15:04")
-		headerLine := fmt.Sprintf("%s  %s", from, timeStr)
+		// Right-justify timestamp: sender on left, time on right
+		gap := bodyWidth - len(from) - len(timeStr)
+		if gap < 2 {
+			gap = 2
+		}
+		headerLine := from + strings.Repeat(" ", gap) + timeStr
 
 		allLines = append(allLines, chatLine{
 			text: headerLine, msgIdx: i, isFirst: true,
@@ -615,7 +622,8 @@ func (m Model) textFooterView() string {
 
 	case textLevelTimeline:
 		keys = []string{
-			"\u2191/\u2193 navigate", "Esc back",
+			"\u2191/\u2193 navigate", "r reverse",
+			"/ search", "Esc back",
 			"m email", "? help",
 		}
 		n := len(m.textState.messages)

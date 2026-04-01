@@ -51,6 +51,13 @@ func textMsgTypeFilterAlias(alias string) string {
 	return alias + ".message_type IN ('whatsapp','imessage','sms','google_voice_text')"
 }
 
+func sqliteDirection(d SortDirection) string {
+	if d == SortAsc {
+		return "ASC"
+	}
+	return "DESC"
+}
+
 // buildSQLiteTextFilterConditions builds WHERE conditions from a TextFilter.
 // All conditions use the m. prefix for the messages table.
 func buildSQLiteTextFilterConditions(filter TextFilter) (string, []interface{}) {
@@ -387,9 +394,9 @@ func (e *SQLiteEngine) ListConversationMessages(
 		LEFT JOIN conversations c ON c.id = m.conversation_id
 		LEFT JOIN message_bodies mb ON mb.message_id = m.id
 		WHERE %s
-		ORDER BY m.sent_at ASC
+		ORDER BY m.sent_at %s
 		LIMIT ? OFFSET ?
-	`, where)
+	`, where, sqliteDirection(filter.SortDirection))
 
 	args = append(args, limit, filter.Pagination.Offset)
 

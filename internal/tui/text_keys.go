@@ -112,6 +112,24 @@ func (m Model) handleTextTimelineKeys(
 	msg tea.KeyMsg,
 ) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "r":
+		// Reverse chronological order
+		if m.textState.filter.SortDirection == query.SortAsc {
+			m.textState.filter.SortDirection = query.SortDesc
+		} else {
+			m.textState.filter.SortDirection = query.SortAsc
+		}
+		m.textState.cursor = 0
+		m.textState.scrollOffset = 0
+		m.loading = true
+		return m, m.loadTextMessages()
+
+	case "/":
+		m.inlineSearchActive = true
+		m.searchInput.Reset()
+		m.searchInput.Focus()
+		return m, nil
+
 	case "esc", "backspace":
 		return m.textGoBack()
 
