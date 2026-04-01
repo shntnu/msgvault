@@ -152,6 +152,36 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
+	// --- Same-timestamp message for preview tie-breaker test ---
+	// Inserted after wa-3 with the SAME sent_at; should have higher ID.
+	// ListConversations should pick this as last_preview (highest ID wins).
+	{
+		sameTimestamp := baseTime.Add(2 * time.Minute) // same as wa-3
+		msg := &store.Message{
+			SourceID:        src1.ID,
+			SourceMessageID: "wa-4-tiebreaker",
+			ConversationID:  conv1ID,
+			MessageType:     "whatsapp",
+			Snippet:         sql.NullString{String: "tiebreaker preview", Valid: true},
+			SentAt:          sql.NullTime{Time: sameTimestamp, Valid: true},
+			SizeEstimate:    18,
+			SenderID:        sql.NullInt64{Int64: phoneParticipantID, Valid: true},
+		}
+		msgID, err := s.UpsertMessage(msg)
+		if err != nil {
+			t.Fatalf("UpsertMessage(wa-4-tiebreaker): %v", err)
+		}
+		if err := s.UpsertMessageBody(msgID,
+			sql.NullString{String: "tiebreaker preview", Valid: true},
+			sql.NullString{}); err != nil {
+			t.Fatalf("UpsertMessageBody(wa-4-tiebreaker): %v", err)
+		}
+		if err := s.ReplaceMessageRecipients(msgID, "from",
+			[]int64{phoneParticipantID}, []string{"Alice"}); err != nil {
+			t.Fatalf("ReplaceMessageRecipients(wa-4-tiebreaker): %v", err)
+		}
+	}
+
 	// --- Message with NULL sender_id (backward-compatibility) ---
 	// Some older imports only have message_recipients "from" rows, not sender_id.
 	// Verify that TextAggregate still picks these up via the COALESCE fallback.
@@ -224,8 +254,8 @@ func TestIntegration(t *testing.T) {
 	).Scan(&msgCount); err != nil {
 		t.Fatalf("read conv1 stats: %v", err)
 	}
-	if msgCount != 3 {
-		t.Errorf("conv1 message_count: got %d, want 3", msgCount)
+	if msgCount != 4 {
+		t.Errorf("conv1 message_count: got %d, want 4", msgCount)
 	}
 
 	// --- TextEngine queries ---
@@ -249,13 +279,18 @@ func TestIntegration(t *testing.T) {
 	if row, ok := convByID[conv1ID]; !ok {
 		t.Errorf("conv1 not found in ListConversations results")
 	} else {
-		if row.MessageCount != 3 {
-			t.Errorf("conv1 MessageCount: got %d, want 3", row.MessageCount)
+		if row.MessageCount != 4 {
+			t.Errorf("conv1 MessageCount: got %d, want 4", row.MessageCount)
 		}
 		if row.LastMessageAt.IsZero() {
 			t.Error("conv1 LastMessageAt is zero")
 		} else if !row.LastMessageAt.Equal(wantConv1LastAt) {
 			t.Errorf("conv1 LastMessageAt: got %v, want %v", row.LastMessageAt, wantConv1LastAt)
+		}
+		// Preview tie-breaker: wa-3 and wa-4-tiebreaker share the same
+		// timestamp; the higher-ID message should win.
+		if row.LastPreview != "tiebreaker preview" {
+			t.Errorf("conv1 LastPreview: got %q, want %q", row.LastPreview, "tiebreaker preview")
 		}
 	}
 	if row, ok := convByID[conv2ID]; !ok {
@@ -272,8 +307,8 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// TextAggregate by contacts — groups by phone number.
-	// All 6 messages have +15551234567 as the from participant
-	// (5 via sender_id, 1 via message_recipients fallback with NULL sender_id).
+	// All 7 messages have +15551234567 as the from participant
+	// (6 via sender_id, 1 via message_recipients fallback with NULL sender_id).
 	aggRows, err := te.TextAggregate(ctx, query.TextViewContacts, query.TextAggregateOptions{Limit: 100})
 	if err != nil {
 		t.Fatalf("TextAggregate(TextViewContacts): %v", err)
@@ -285,8 +320,8 @@ func TestIntegration(t *testing.T) {
 	for _, row := range aggRows {
 		if row.Key == "+15551234567" {
 			foundPhone = true
-			if row.Count != 6 {
-				t.Errorf("contact +15551234567: got count %d, want 6", row.Count)
+			if row.Count != 7 {
+				t.Errorf("contact +15551234567: got count %d, want 7", row.Count)
 			}
 		}
 	}
@@ -299,8 +334,8 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListConversationMessages(conv1): %v", err)
 	}
-	if len(messages) != 3 {
-		t.Errorf("ListConversationMessages(conv1): got %d messages, want 3", len(messages))
+	if len(messages) != 4 {
+		t.Errorf("ListConversationMessages(conv1): got %d messages, want 4", len(messages))
 	}
 	// Verify chronological order (ascending by sent_at).
 	for i := 1; i < len(messages); i++ {
@@ -315,13 +350,13 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
-	// GetTextStats — should count all 6 text messages.
+	// GetTextStats — should count all 7 text messages.
 	stats, err := te.GetTextStats(ctx, query.TextStatsOptions{})
 	if err != nil {
 		t.Fatalf("GetTextStats: %v", err)
 	}
-	if stats.MessageCount != 6 {
-		t.Errorf("GetTextStats.MessageCount: got %d, want 6", stats.MessageCount)
+	if stats.MessageCount != 7 {
+		t.Errorf("GetTextStats.MessageCount: got %d, want 7", stats.MessageCount)
 	}
 	// Should see 2 accounts (sources).
 	if stats.AccountCount != 2 {
@@ -337,7 +372,7 @@ func TestIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTextStats(src1): %v", err)
 	}
-	if statsS1.MessageCount != 3 {
-		t.Errorf("GetTextStats(src1).MessageCount: got %d, want 3", statsS1.MessageCount)
+	if statsS1.MessageCount != 4 {
+		t.Errorf("GetTextStats(src1).MessageCount: got %d, want 4", statsS1.MessageCount)
 	}
 }

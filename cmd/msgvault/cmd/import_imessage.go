@@ -76,10 +76,18 @@ func runImportImessage(cmd *cobra.Command, _ []string) error {
 
 	// Reuse any existing apple_messages source to preserve dedup keys
 	// from previous imports (which may have used --me as the identifier).
+	// Prefer a legacy (non-"local") source when both exist.
 	var src *store.Source
 	existingSources, listErr := s.ListSources("apple_messages")
 	if listErr == nil && len(existingSources) > 0 {
+		// Prefer legacy source (non-"local") for backward compat
 		src = existingSources[0]
+		for _, s := range existingSources {
+			if s.Identifier != "local" {
+				src = s
+				break
+			}
+		}
 	} else {
 		src, err = s.GetOrCreateSource("apple_messages", "local")
 		if err != nil {
