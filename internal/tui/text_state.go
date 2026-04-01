@@ -33,10 +33,6 @@ type textState struct {
 	filter         query.TextFilter
 	stats          *query.TotalStats
 	breadcrumbs    []textNavSnapshot
-
-	// Inline message expansion
-	expandedIdx  int    // index of expanded message (-1 = none)
-	expandedBody string // full body text of expanded message
 }
 
 // textNavSnapshot stores state for text mode navigation history.

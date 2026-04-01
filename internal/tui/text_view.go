@@ -418,7 +418,9 @@ func (m Model) textAggregateView() string {
 	return sb.String()
 }
 
-// textTimelineView renders a chronological message timeline.
+// textTimelineView renders a chat-style message timeline.
+// Each message shows a sender/time header line followed by the full
+// body text with word wrapping — like reading a chat app.
 func (m Model) textTimelineView() string {
 	if len(m.textState.messages) == 0 && !m.loading {
 		return m.fillScreen(
@@ -430,76 +432,24 @@ func (m Model) textTimelineView() string {
 
 	var sb strings.Builder
 
-	// Visible row range
-	endRow := m.textState.scrollOffset + m.pageSize - 1
-	if endRow > len(m.textState.messages) {
-		endRow = len(m.textState.messages)
+	// Build rendered lines for visible messages. Each message
+	// produces multiple screen lines: a header + wrapped body.
+	type chatLine struct {
+		text    string
+		msgIdx  int
+		isFirst bool // first line of this message (shows cursor)
 	}
 
-	// Measure sender column from visible data
-	senderVals := make(
-		[]string, 0, endRow-m.textState.scrollOffset,
-	)
-	for i := m.textState.scrollOffset; i < endRow; i++ {
+	bodyWidth := m.width - 6 // indent + margin
+	if bodyWidth < 20 {
+		bodyWidth = 20
+	}
+
+	var allLines []chatLine
+	for i := 0; i < len(m.textState.messages); i++ {
 		msg := m.textState.messages[i]
-		from := msg.FromName
-		if from == "" && msg.FromPhone != "" {
-			from = msg.FromPhone
-		}
-		if from == "" {
-			from = msg.FromEmail
-		}
-		senderVals = append(senderVals, from)
-	}
-	fromWidth := measureMaxWidth(senderVals, len("Sender"))
-	if fromWidth > 25 {
-		fromWidth = 25
-	}
-	if fromWidth < 10 {
-		fromWidth = 10
-	}
 
-	// Fixed column widths
-	const (
-		indicatorWidth = 3
-		dateWidth      = 16
-		colSpacing     = 7 // gaps between columns
-	)
-	fixedTotal := indicatorWidth + dateWidth +
-		fromWidth + colSpacing
-	bodyWidth := m.width - fixedTotal
-	if bodyWidth < 10 {
-		bodyWidth = 10
-	}
-
-	// Header
-	headerRow := fmt.Sprintf(
-		"   %-*s  %-*s  %-*s",
-		dateWidth, "Time",
-		fromWidth, "Sender",
-		bodyWidth, "Message",
-	)
-	sb.WriteString(
-		tableHeaderStyle.Render(padRight(headerRow, m.width)),
-	)
-	sb.WriteString("\n")
-	sb.WriteString(
-		separatorStyle.Render(strings.Repeat("\u2500", m.width)),
-	)
-	sb.WriteString("\n")
-
-	for i := m.textState.scrollOffset; i < endRow; i++ {
-		msg := m.textState.messages[i]
-		isCursor := i == m.textState.cursor
-
-		indicator := "   "
-		if isCursor {
-			indicator = cursorRowStyle.Render("\u25b6  ")
-		}
-
-		dateStr := msg.SentAt.Format("2006-01-02 15:04")
-
-		// Sender: prefer name, then phone, then email
+		// Sender line: "Name  12:34 PM" or "Name  2026-03-05 12:34"
 		from := textutil.SanitizeTerminal(msg.FromName)
 		if from == "" && msg.FromPhone != "" {
 			from = textutil.SanitizeTerminal(msg.FromPhone)
@@ -507,76 +457,115 @@ func (m Model) textTimelineView() string {
 		if from == "" {
 			from = textutil.SanitizeTerminal(msg.FromEmail)
 		}
-		from = truncateRunes(from, fromWidth)
-		from = fmt.Sprintf("%-*s", fromWidth, from)
-
-		// Message body: use snippet
-		body := textutil.SanitizeTerminal(msg.Snippet)
-		if body == "" {
-			body = textutil.SanitizeTerminal(msg.Subject)
+		if from == "" {
+			from = "Unknown"
 		}
-		body = truncateRunes(body, bodyWidth)
-		body = fmt.Sprintf("%-*s", bodyWidth, body)
+		timeStr := msg.SentAt.Format("2006-01-02 15:04")
+		headerLine := fmt.Sprintf("%s  %s", from, timeStr)
 
-		line := fmt.Sprintf(
-			"%-*s  %s  %s",
-			dateWidth, dateStr, from, body,
-		)
+		allLines = append(allLines, chatLine{
+			text: headerLine, msgIdx: i, isFirst: true,
+		})
+
+		// Body lines — use BodyText if available, fall back to Snippet
+		body := textutil.SanitizeTerminal(msg.BodyText)
+		if body == "" {
+			body = textutil.SanitizeTerminal(msg.Snippet)
+		}
+		if body == "" {
+			body = "(no text)"
+		}
+		for _, wline := range wrapText(body, bodyWidth) {
+			allLines = append(allLines, chatLine{
+				text: wline, msgIdx: i,
+			})
+		}
+
+		// Blank line between messages
+		allLines = append(allLines, chatLine{
+			text: "", msgIdx: i,
+		})
+	}
+
+	// Scroll offset is in screen lines, not message indices.
+	// Map cursor (message index) to screen line offset.
+	cursorLine := 0
+	for _, cl := range allLines {
+		if cl.msgIdx == m.textState.cursor && cl.isFirst {
+			break
+		}
+		cursorLine++
+	}
+
+	// Ensure cursor is visible
+	visibleLines := m.pageSize - 1
+	scrollLine := m.textState.scrollOffset
+	if cursorLine < scrollLine {
+		scrollLine = cursorLine
+	}
+	if cursorLine >= scrollLine+visibleLines {
+		scrollLine = cursorLine - visibleLines + 3
+	}
+	if scrollLine < 0 {
+		scrollLine = 0
+	}
+
+	// Render visible lines
+	linesWritten := 0
+	for li := scrollLine; li < len(allLines) &&
+		linesWritten < visibleLines; li++ {
+		cl := allLines[li]
+		isCursorMsg := cl.msgIdx == m.textState.cursor
 
 		var style lipgloss.Style
-		if isCursor {
+		if isCursorMsg {
 			style = cursorRowStyle
-		} else if i%2 == 0 {
+		} else if cl.msgIdx%2 == 0 {
 			style = normalRowStyle
 		} else {
 			style = altRowStyle
 		}
 
-		sb.WriteString(indicator)
-		sb.WriteString(
-			style.Render(padRight(line, m.width-3)),
-		)
-		sb.WriteString("\n")
+		indicator := "   "
+		if cl.isFirst && isCursorMsg {
+			indicator = cursorRowStyle.Render("\u25b6  ")
+		}
 
-		// Inline expansion: show full wrapped body below this row
-		if i == m.textState.expandedIdx {
-			bodyText := m.textState.expandedBody
-			if bodyText == "" {
-				bodyText = "(loading...)"
-			}
-			bodyText = textutil.SanitizeTerminal(bodyText)
-			indent := strings.Repeat(" ", indicatorWidth)
-			wrapWidth := m.width - indicatorWidth - 2
-			if wrapWidth < 20 {
-				wrapWidth = 20
-			}
-			for _, wline := range wrapText(bodyText, wrapWidth) {
-				sb.WriteString(indent)
-				sb.WriteString(
-					style.Render(
-						padRight(wline, m.width-indicatorWidth),
-					),
-				)
-				sb.WriteString("\n")
-			}
-			// Blank separator after expanded body
+		if cl.isFirst {
+			// Header line: bold-ish via the style
+			sb.WriteString(indicator)
 			sb.WriteString(
-				normalRowStyle.Render(
-					strings.Repeat(" ", m.width),
+				style.Bold(true).Render(
+					padRight(cl.text, m.width-3),
 				),
 			)
-			sb.WriteString("\n")
+		} else {
+			// Body or blank line
+			sb.WriteString("   ")
+			sb.WriteString(
+				style.Render(
+					padRight("  "+cl.text, m.width-3),
+				),
+			)
 		}
+		sb.WriteString("\n")
+		linesWritten++
 	}
 
 	// Fill remaining space
-	dataRows := endRow - m.textState.scrollOffset
-	for i := dataRows; i < m.pageSize-1; i++ {
+	for linesWritten < visibleLines {
 		sb.WriteString(
-			normalRowStyle.Render(strings.Repeat(" ", m.width)),
+			normalRowStyle.Render(
+				strings.Repeat(" ", m.width),
+			),
 		)
 		sb.WriteString("\n")
+		linesWritten++
 	}
+
+	// Store scroll offset back (in screen lines)
+	// Note: can't mutate m here since View is read-only;
+	// the scrollOffset is maintained by the key handler.
 
 	// Info line
 	sb.WriteString(m.renderNotificationLine())
@@ -626,8 +615,8 @@ func (m Model) textFooterView() string {
 
 	case textLevelTimeline:
 		keys = []string{
-			"\u2191/\u2193 navigate", "Enter expand",
-			"Esc back", "m email", "? help",
+			"\u2191/\u2193 navigate", "Esc back",
+			"m email", "? help",
 		}
 		n := len(m.textState.messages)
 		if n > 0 {

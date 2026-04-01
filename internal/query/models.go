@@ -37,6 +37,7 @@ type MessageSummary struct {
 	DeletedAt            *time.Time `json:"deleted_at,omitempty"`         // When message was deleted from server (nil if not deleted)
 	MessageType          string     `json:"message_type,omitempty"`       // e.g., "email", "whatsapp" — from messages.message_type
 	ConversationTitle    string     `json:"conversation_title,omitempty"` // Group/chat name from conversations.title
+	BodyText             string     `json:"body_text,omitempty"`          // Full body text (only populated for timeline views)
 }
 
 // MessageDetail represents a full message with body and attachments.

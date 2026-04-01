@@ -34,13 +34,6 @@ type textSearchResultMsg struct {
 	err      error
 }
 
-// textMessageBodyMsg is sent when a message body is fetched for expansion.
-type textMessageBodyMsg struct {
-	idx  int    // index in m.textState.messages
-	body string // full body text
-	err  error
-}
-
 // textStatsLoadedMsg is sent when text stats are loaded.
 type textStatsLoadedMsg struct {
 	stats *query.TotalStats
@@ -157,28 +150,4 @@ func (m Model) loadTextData() tea.Cmd {
 	default:
 		return m.loadTextAggregate()
 	}
-}
-
-// loadTextMessageBody fetches the full body of a message for inline expansion.
-func (m Model) loadTextMessageBody(msgID int64, idx int) tea.Cmd {
-	eng := m.engine
-	return safeCmdWithPanic(
-		func() tea.Msg {
-			detail, err := eng.GetMessage(
-				context.Background(), msgID,
-			)
-			if err != nil {
-				return textMessageBodyMsg{idx: idx, err: err}
-			}
-			return textMessageBodyMsg{
-				idx: idx, body: detail.BodyText,
-			}
-		},
-		func(r any) tea.Msg {
-			return textMessageBodyMsg{
-				idx: idx,
-				err: fmt.Errorf("fetch body panic: %v", r),
-			}
-		},
-	)
 }

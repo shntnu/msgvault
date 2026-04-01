@@ -112,31 +112,7 @@ func (m Model) handleTextTimelineKeys(
 	msg tea.KeyMsg,
 ) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "enter":
-		// Toggle inline expansion of the current message
-		idx := m.textState.cursor
-		if idx < 0 || idx >= len(m.textState.messages) {
-			return m, nil
-		}
-		if m.textState.expandedIdx == idx {
-			// Collapse
-			m.textState.expandedIdx = -1
-			m.textState.expandedBody = ""
-			return m, nil
-		}
-		// Expand — fetch full body
-		m.textState.expandedIdx = idx
-		m.textState.expandedBody = "" // loading
-		msgID := m.textState.messages[idx].ID
-		return m, m.loadTextMessageBody(msgID, idx)
-
 	case "esc", "backspace":
-		if m.textState.expandedIdx >= 0 {
-			// Close expansion first
-			m.textState.expandedIdx = -1
-			m.textState.expandedBody = ""
-			return m, nil
-		}
 		return m.textGoBack()
 
 	case "j", "down":
@@ -407,8 +383,6 @@ func (m Model) textDrillDown() (tea.Model, tea.Cmd) {
 		m.textState.level = textLevelTimeline
 		m.textState.cursor = 0
 		m.textState.scrollOffset = 0
-		m.textState.expandedIdx = -1
-		m.textState.expandedBody = ""
 		m.loading = true
 		return m, m.loadTextMessages()
 

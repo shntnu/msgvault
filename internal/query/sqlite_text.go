@@ -380,10 +380,12 @@ func (e *SQLiteEngine) ListConversationMessages(
 			m.attachment_count,
 			m.deleted_from_source_at,
 			COALESCE(m.message_type, '') AS message_type,
-			COALESCE(c.title, '') AS conv_title
+			COALESCE(c.title, '') AS conv_title,
+			COALESCE(mb.body_text, m.snippet, '') AS body_text
 		FROM messages m
 		LEFT JOIN participants p_sender ON p_sender.id = m.sender_id
 		LEFT JOIN conversations c ON c.id = m.conversation_id
+		LEFT JOIN message_bodies mb ON mb.message_id = m.id
 		WHERE %s
 		ORDER BY m.sent_at ASC
 		LIMIT ? OFFSET ?
@@ -397,7 +399,7 @@ func (e *SQLiteEngine) ListConversationMessages(
 	}
 	defer func() { _ = rows.Close() }()
 
-	return scanMessageSummaries(rows)
+	return scanMessageSummariesWithBody(rows)
 }
 
 // TextSearch performs plain full-text search over text messages.

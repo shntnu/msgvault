@@ -297,6 +297,15 @@ func (e *DuckDBEngine) TextAggregate(
 func (e *DuckDBEngine) ListConversationMessages(
 	ctx context.Context, convID int64, filter TextFilter,
 ) ([]MessageSummary, error) {
+	// Use SQLite directly for timeline messages — Parquet doesn't
+	// include message_bodies, and timelines need the full body text.
+	if e.sqliteEngine != nil {
+		return e.sqliteEngine.ListConversationMessages(
+			ctx, convID, filter,
+		)
+	}
+
+	// Fallback to Parquet (snippet only, no body text)
 	where, args := e.buildTextFilterConditions(filter)
 	where += " AND msg.conversation_id = ?"
 	args = append(args, convID)
@@ -496,8 +505,51 @@ func (e *DuckDBEngine) GetTextStats(
 	return stats, nil
 }
 
+// scanMessageSummariesWithBody scans rows that include a body_text column
+// as the 17th field. Used by ListConversationMessages for chat timelines.
+func scanMessageSummariesWithBody(rows *sql.Rows) ([]MessageSummary, error) {
+	var results []MessageSummary
+	for rows.Next() {
+		var msg MessageSummary
+		var sentAt sql.NullTime
+		var deletedAt sql.NullTime
+		if err := rows.Scan(
+			&msg.ID,
+			&msg.SourceMessageID,
+			&msg.ConversationID,
+			&msg.SourceConversationID,
+			&msg.Subject,
+			&msg.Snippet,
+			&msg.FromEmail,
+			&msg.FromName,
+			&msg.FromPhone,
+			&sentAt,
+			&msg.SizeEstimate,
+			&msg.HasAttachments,
+			&msg.AttachmentCount,
+			&deletedAt,
+			&msg.MessageType,
+			&msg.ConversationTitle,
+			&msg.BodyText,
+		); err != nil {
+			return nil, fmt.Errorf("scan message: %w", err)
+		}
+		if sentAt.Valid {
+			msg.SentAt = sentAt.Time
+		}
+		if deletedAt.Valid {
+			msg.DeletedAt = &deletedAt.Time
+		}
+		results = append(results, msg)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate messages: %w", err)
+	}
+	return results, nil
+}
+
 // scanMessageSummaries scans rows into MessageSummary slices.
-// Shared by ListConversationMessages and TextSearch.
+// Shared by TextSearch and Parquet-based timeline fallback.
 func scanMessageSummaries(rows *sql.Rows) ([]MessageSummary, error) {
 	var results []MessageSummary
 	for rows.Next() {
