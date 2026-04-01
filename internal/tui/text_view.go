@@ -537,6 +537,36 @@ func (m Model) textTimelineView() string {
 			style.Render(padRight(line, m.width-3)),
 		)
 		sb.WriteString("\n")
+
+		// Inline expansion: show full wrapped body below this row
+		if i == m.textState.expandedIdx {
+			bodyText := m.textState.expandedBody
+			if bodyText == "" {
+				bodyText = "(loading...)"
+			}
+			bodyText = textutil.SanitizeTerminal(bodyText)
+			indent := strings.Repeat(" ", indicatorWidth)
+			wrapWidth := m.width - indicatorWidth - 2
+			if wrapWidth < 20 {
+				wrapWidth = 20
+			}
+			for _, wline := range wrapText(bodyText, wrapWidth) {
+				sb.WriteString(indent)
+				sb.WriteString(
+					style.Render(
+						padRight(wline, m.width-indicatorWidth),
+					),
+				)
+				sb.WriteString("\n")
+			}
+			// Blank separator after expanded body
+			sb.WriteString(
+				normalRowStyle.Render(
+					strings.Repeat(" ", m.width),
+				),
+			)
+			sb.WriteString("\n")
+		}
 	}
 
 	// Fill remaining space
@@ -596,8 +626,8 @@ func (m Model) textFooterView() string {
 
 	case textLevelTimeline:
 		keys = []string{
-			"\u2191/\u2193 navigate", "Esc back",
-			"m email", "? help",
+			"\u2191/\u2193 navigate", "Enter expand",
+			"Esc back", "m email", "? help",
 		}
 		n := len(m.textState.messages)
 		if n > 0 {

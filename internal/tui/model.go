@@ -767,6 +767,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleTextSearchResult(msg)
 	case textStatsLoadedMsg:
 		return m.handleTextStatsLoaded(msg)
+	case textMessageBodyMsg:
+		if msg.err != nil {
+			return m, nil // silently ignore body fetch errors
+		}
+		if msg.idx == m.textState.expandedIdx {
+			m.textState.expandedBody = msg.body
+		}
+		return m, nil
 	}
 	return m, nil
 }
