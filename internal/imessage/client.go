@@ -6,24 +6,23 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/wesm/msgvault/internal/gmail"
+	"github.com/wesm/msgvault/internal/mime"
+	"github.com/wesm/msgvault/internal/store"
 )
 
 const defaultPageSize = 500
 
-// Client reads from macOS's iMessage chat.db and implements the gmail.API
-// interface so it can be used with the existing sync infrastructure.
+// Client reads from macOS's iMessage chat.db and imports messages
+// directly into the msgvault store.
 type Client struct {
 	db             *sql.DB
-	identifier     string    // source identifier for GetProfile (e.g., "local")
-	myAddress      string    // normalized email-like address for the device owner
-	afterDate      time.Time // only sync messages after this date
-	beforeDate     time.Time // only sync messages before this date
-	limit          int       // max total messages to return (0 = unlimited)
-	returned       int       // messages returned so far (for limit tracking)
+	afterDate      time.Time // only import messages after this date
+	beforeDate     time.Time // only import messages before this date
+	limit          int       // max total messages to import (0 = unlimited)
 	useNanoseconds bool      // whether chat.db uses nanosecond timestamps
 	logger         *slog.Logger
 	pageSize       int
@@ -42,15 +41,9 @@ func WithBeforeDate(t time.Time) ClientOption {
 	return func(c *Client) { c.beforeDate = t }
 }
 
-// WithLimit sets the maximum number of messages to return across all pages.
+// WithLimit sets the maximum number of messages to import.
 func WithLimit(n int) ClientOption {
 	return func(c *Client) { c.limit = n }
-}
-
-// WithMyAddress sets the owner's email-like address for MIME From headers
-// on is_from_me messages.
-func WithMyAddress(addr string) ClientOption {
-	return func(c *Client) { c.myAddress = addr }
 }
 
 // WithImessageLogger sets the logger for the client.
@@ -58,11 +51,12 @@ func WithImessageLogger(l *slog.Logger) ClientOption {
 	return func(c *Client) { c.logger = l }
 }
 
-// NewClient opens a read-only connection to an iMessage chat.db file
-// and returns a Client that implements gmail.API.
-func NewClient(dbPath string, identifier string, opts ...ClientOption) (*Client, error) {
-	// Open chat.db read-only
-	dsn := fmt.Sprintf("file:%s?mode=ro&_journal_mode=WAL&_busy_timeout=5000", dbPath)
+// NewClient opens a read-only connection to an iMessage chat.db file.
+func NewClient(dbPath string, opts ...ClientOption) (*Client, error) {
+	dsn := fmt.Sprintf(
+		"file:%s?mode=ro&_journal_mode=WAL&_busy_timeout=5000",
+		dbPath,
+	)
 	db, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open chat.db: %w", err)
@@ -70,22 +64,22 @@ func NewClient(dbPath string, identifier string, opts ...ClientOption) (*Client,
 
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("connect to chat.db: %w (check Full Disk Access permissions)", err)
+		return nil, fmt.Errorf(
+			"connect to chat.db: %w (check Full Disk Access permissions)",
+			err,
+		)
 	}
 
 	c := &Client{
-		db:         db,
-		identifier: identifier,
-		myAddress:  "me@imessage.local",
-		logger:     slog.Default(),
-		pageSize:   defaultPageSize,
+		db:       db,
+		logger:   slog.Default(),
+		pageSize: defaultPageSize,
 	}
 
 	for _, opt := range opts {
 		opt(c)
 	}
 
-	// Detect timestamp format (nanoseconds vs seconds)
 	if err := c.detectTimestampFormat(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("detect timestamp format: %w", err)
@@ -103,7 +97,9 @@ func (c *Client) Close() error {
 // (macOS High Sierra+) or second timestamps (older macOS).
 func (c *Client) detectTimestampFormat() error {
 	var maxDate sql.NullInt64
-	err := c.db.QueryRow("SELECT MAX(date) FROM message WHERE date > 0").Scan(&maxDate)
+	err := c.db.QueryRow(
+		"SELECT MAX(date) FROM message WHERE date > 0",
+	).Scan(&maxDate)
 	if err != nil {
 		return fmt.Errorf("query max date: %w", err)
 	}
@@ -113,135 +109,9 @@ func (c *Client) detectTimestampFormat() error {
 	return nil
 }
 
-// GetProfile returns a profile with the message count and max ROWID as history ID.
-func (c *Client) GetProfile(ctx context.Context) (*gmail.Profile, error) {
-	var count int64
-	if err := c.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM message").Scan(&count); err != nil {
-		return nil, fmt.Errorf("count messages: %w", err)
-	}
-
-	var maxROWID sql.NullInt64
-	if err := c.db.QueryRowContext(ctx, "SELECT MAX(ROWID) FROM message").Scan(&maxROWID); err != nil {
-		return nil, fmt.Errorf("get max rowid: %w", err)
-	}
-
-	historyID := uint64(0)
-	if maxROWID.Valid {
-		historyID = uint64(maxROWID.Int64)
-	}
-
-	return &gmail.Profile{
-		EmailAddress:  c.identifier,
-		MessagesTotal: count,
-		HistoryID:     historyID,
-	}, nil
-}
-
-// ListLabels returns iMessage and SMS as labels.
-func (c *Client) ListLabels(ctx context.Context) ([]*gmail.Label, error) {
-	return []*gmail.Label{
-		{ID: "iMessage", Name: "iMessage", Type: "user"},
-		{ID: "SMS", Name: "SMS", Type: "user"},
-	}, nil
-}
-
-// ListMessages returns a page of message IDs from chat.db, ordered by ROWID.
-// The pageToken is the string representation of the last seen ROWID.
-// The query parameter is ignored (date filtering is done via client options).
-func (c *Client) ListMessages(ctx context.Context, query string, pageToken string) (*gmail.MessageListResponse, error) {
-	// Check limit
-	if c.limit > 0 && c.returned >= c.limit {
-		return &gmail.MessageListResponse{}, nil
-	}
-
-	lastROWID := int64(0)
-	if pageToken != "" {
-		var err error
-		lastROWID, err = strconv.ParseInt(pageToken, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("invalid page token: %w", err)
-		}
-	}
-
-	// Build query
-	sqlQuery := `
-		SELECT m.ROWID, COALESCE(c.guid, 'no-chat-' || CAST(m.ROWID AS TEXT)) as chat_guid
-		FROM message m
-		LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
-		LEFT JOIN chat c ON c.ROWID = cmj.chat_id
-		WHERE m.ROWID > ?`
-	args := []interface{}{lastROWID}
-
-	if !c.afterDate.IsZero() {
-		appleTS := timeToAppleTimestamp(c.afterDate, c.useNanoseconds)
-		sqlQuery += " AND m.date >= ?"
-		args = append(args, appleTS)
-	}
-	if !c.beforeDate.IsZero() {
-		appleTS := timeToAppleTimestamp(c.beforeDate, c.useNanoseconds)
-		sqlQuery += " AND m.date < ?"
-		args = append(args, appleTS)
-	}
-
-	sqlQuery += " ORDER BY m.ROWID ASC LIMIT ?"
-
-	// Calculate page size respecting limit
-	pageSize := c.pageSize
-	if c.limit > 0 {
-		remaining := c.limit - c.returned
-		if remaining < pageSize {
-			pageSize = remaining
-		}
-	}
-	args = append(args, pageSize)
-
-	rows, err := c.db.QueryContext(ctx, sqlQuery, args...)
-	if err != nil {
-		return nil, fmt.Errorf("list messages: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-
-	var messages []gmail.MessageID
-	var maxRowID int64
-	for rows.Next() {
-		var rowID int64
-		var chatGUID string
-		if err := rows.Scan(&rowID, &chatGUID); err != nil {
-			return nil, fmt.Errorf("scan message: %w", err)
-		}
-		messages = append(messages, gmail.MessageID{
-			ID:       strconv.FormatInt(rowID, 10),
-			ThreadID: chatGUID,
-		})
-		maxRowID = rowID
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate messages: %w", err)
-	}
-
-	c.returned += len(messages)
-
-	// Determine next page token
-	var nextPageToken string
-	if len(messages) == pageSize {
-		nextPageToken = strconv.FormatInt(maxRowID, 10)
-	}
-
-	// Get total estimate for progress reporting
-	totalEstimate := int64(len(messages))
-	if pageToken == "" {
-		totalEstimate = c.countFilteredMessages(ctx)
-	}
-
-	return &gmail.MessageListResponse{
-		Messages:           messages,
-		NextPageToken:      nextPageToken,
-		ResultSizeEstimate: totalEstimate,
-	}, nil
-}
-
-// countFilteredMessages returns the total count of messages matching the date filters.
-func (c *Client) countFilteredMessages(ctx context.Context) int64 {
+// CountFilteredMessages returns the total count of messages matching
+// the date filters, for progress reporting.
+func (c *Client) CountFilteredMessages(ctx context.Context) int64 {
 	sqlQuery := "SELECT COUNT(*) FROM message WHERE 1=1"
 	var args []interface{}
 
@@ -263,18 +133,99 @@ func (c *Client) countFilteredMessages(ctx context.Context) int64 {
 	return count
 }
 
-// GetMessageRaw fetches a single message and builds synthetic MIME data.
-func (c *Client) GetMessageRaw(ctx context.Context, messageID string) (*gmail.RawMessage, error) {
-	rowID, err := strconv.ParseInt(messageID, 10, 64)
+// Import reads all matching messages from chat.db and writes them
+// into the msgvault store using direct store methods.
+func (c *Client) Import(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+) (*ImportSummary, error) {
+	summary := &ImportSummary{}
+
+	// Pre-create iMessage and SMS labels
+	imessageLabelID, err := s.EnsureLabel(
+		sourceID, "iMessage", "iMessage", "user",
+	)
 	if err != nil {
-		return nil, fmt.Errorf("invalid message ID: %w", err)
+		return nil, fmt.Errorf("ensure iMessage label: %w", err)
+	}
+	smsLabelID, err := s.EnsureLabel(sourceID, "SMS", "SMS", "user")
+	if err != nil {
+		return nil, fmt.Errorf("ensure SMS label: %w", err)
 	}
 
-	// Query message with handle and chat info
-	var msg messageRow
-	err = c.db.QueryRowContext(ctx, `
+	// Track resolved participants to avoid repeated DB calls
+	phoneCache := map[string]int64{} // phone -> participantID
+	emailCache := map[string]int64{} // email -> participantID
+	convCache := map[string]int64{}  // chatGUID -> conversationID
+	imported := 0
+	lastROWID := int64(0)
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+
+		if c.limit > 0 && imported >= c.limit {
+			break
+		}
+
+		rows, pageCount, err := c.fetchPage(ctx, lastROWID)
+		if err != nil {
+			return summary, fmt.Errorf("fetch page: %w", err)
+		}
+		if pageCount == 0 {
+			break
+		}
+
+		for _, msg := range rows {
+			if err := ctx.Err(); err != nil {
+				return summary, err
+			}
+			if c.limit > 0 && imported >= c.limit {
+				break
+			}
+
+			if err := c.importMessage(
+				ctx, s, sourceID, &msg,
+				imessageLabelID, smsLabelID,
+				phoneCache, emailCache, convCache,
+				summary,
+			); err != nil {
+				c.logger.Warn(
+					"failed to import message",
+					"rowid", msg.ROWID,
+					"error", err,
+				)
+				summary.Skipped++
+				continue
+			}
+
+			imported++
+			lastROWID = msg.ROWID
+		}
+
+		if pageCount < c.pageSize {
+			break
+		}
+	}
+
+	if err := s.RecomputeConversationStats(sourceID); err != nil {
+		return summary, fmt.Errorf("recompute stats: %w", err)
+	}
+
+	return summary, nil
+}
+
+// fetchPage queries the next batch of messages from chat.db.
+func (c *Client) fetchPage(
+	ctx context.Context,
+	afterROWID int64,
+) ([]messageRow, int, error) {
+	sqlQuery := `
 		SELECT
-			m.ROWID, m.guid, m.text, m.attributedBody, m.date, m.is_from_me, m.service,
+			m.ROWID, m.guid, m.text, m.attributedBody,
+			m.date, m.is_from_me, m.service,
 			m.cache_has_attachments,
 			h.id,
 			c.ROWID, c.guid, c.display_name, c.chat_identifier
@@ -282,33 +233,109 @@ func (c *Client) GetMessageRaw(ctx context.Context, messageID string) (*gmail.Ra
 		LEFT JOIN handle h ON h.ROWID = m.handle_id
 		LEFT JOIN chat_message_join cmj ON cmj.message_id = m.ROWID
 		LEFT JOIN chat c ON c.ROWID = cmj.chat_id
-		WHERE m.ROWID = ?
-	`, rowID).Scan(
-		&msg.ROWID, &msg.GUID, &msg.Text, &msg.AttributedBody, &msg.Date, &msg.IsFromMe, &msg.Service,
-		&msg.HasAttachments,
-		&msg.HandleID,
-		&msg.ChatROWID, &msg.ChatGUID, &msg.ChatDisplayName, &msg.ChatIdentifier,
-	)
-	if err == sql.ErrNoRows {
-		return nil, &gmail.NotFoundError{Path: "/messages/" + messageID}
+		WHERE m.ROWID > ?`
+	args := []interface{}{afterROWID}
+
+	if !c.afterDate.IsZero() {
+		appleTS := timeToAppleTimestamp(c.afterDate, c.useNanoseconds)
+		sqlQuery += " AND m.date >= ?"
+		args = append(args, appleTS)
 	}
+	if !c.beforeDate.IsZero() {
+		appleTS := timeToAppleTimestamp(c.beforeDate, c.useNanoseconds)
+		sqlQuery += " AND m.date < ?"
+		args = append(args, appleTS)
+	}
+
+	pageSize := c.pageSize
+	if c.limit > 0 {
+		remaining := c.limit
+		if remaining < pageSize {
+			pageSize = remaining
+		}
+	}
+	sqlQuery += " ORDER BY m.ROWID ASC LIMIT ?"
+	args = append(args, pageSize)
+
+	dbRows, err := c.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil, fmt.Errorf("get message %s: %w", messageID, err)
+		return nil, 0, fmt.Errorf("query messages: %w", err)
+	}
+	defer func() { _ = dbRows.Close() }()
+
+	var result []messageRow
+	for dbRows.Next() {
+		var msg messageRow
+		if err := dbRows.Scan(
+			&msg.ROWID, &msg.GUID, &msg.Text, &msg.AttributedBody,
+			&msg.Date, &msg.IsFromMe, &msg.Service,
+			&msg.HasAttachments,
+			&msg.HandleID,
+			&msg.ChatROWID, &msg.ChatGUID, &msg.ChatDisplayName,
+			&msg.ChatIdentifier,
+		); err != nil {
+			return nil, 0, fmt.Errorf("scan message: %w", err)
+		}
+		result = append(result, msg)
+	}
+	if err := dbRows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("iterate messages: %w", err)
 	}
 
-	// Warn about attachments that won't be archived
-	if msg.HasAttachments != 0 {
-		c.logger.Warn("message has attachments that will not be archived (attachment extraction not yet implemented)", "id", messageID, "guid", msg.GUID)
+	return result, len(result), nil
+}
+
+// importMessage processes a single chat.db message row and writes it
+// to the msgvault store.
+func (c *Client) importMessage(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+	msg *messageRow,
+	imessageLabelID, smsLabelID int64,
+	phoneCache map[string]int64,
+	emailCache map[string]int64,
+	convCache map[string]int64,
+	summary *ImportSummary,
+) error {
+	// Determine conversation
+	chatGUID := "no-chat-" + strconv.FormatInt(msg.ROWID, 10)
+	if msg.ChatGUID != nil {
+		chatGUID = *msg.ChatGUID
 	}
 
-	// Determine sender and recipients
-	fromAddr, toAddrs := c.resolveParticipants(ctx, &msg)
+	convID, isNewConv, err := c.ensureConversation(
+		ctx, s, sourceID, msg, chatGUID, convCache,
+		phoneCache, emailCache, summary,
+	)
+	if err != nil {
+		return fmt.Errorf("ensure conversation: %w", err)
+	}
+	if isNewConv {
+		summary.ConversationsImported++
+	}
 
-	// Convert Apple timestamp to time
-	msgDate := appleTimestampToTime(msg.Date)
+	// Resolve sender
+	var senderID sql.NullInt64
+	if msg.IsFromMe != 0 {
+		// is_from_me messages: sender is the device owner, no external handle
+	} else if msg.HandleID != nil {
+		pid, err := c.resolveParticipant(
+			s, *msg.HandleID, phoneCache, emailCache, summary,
+		)
+		if err == nil && pid > 0 {
+			senderID = sql.NullInt64{Int64: pid, Valid: true}
+			_ = s.EnsureConversationParticipant(convID, pid, "member")
+		}
+	}
 
-	// Get message body: prefer plain-text column, fall back to attributedBody blob
-	// (macOS Ventura+ / iOS 16+ stopped populating m.text for many message types).
+	// Determine message type from service field
+	msgType := "imessage"
+	if msg.Service != nil && strings.EqualFold(*msg.Service, "SMS") {
+		msgType = "sms"
+	}
+
+	// Extract body text
 	body := ""
 	if msg.Text != nil {
 		body = *msg.Text
@@ -316,83 +343,133 @@ func (c *Client) GetMessageRaw(ctx context.Context, messageID string) (*gmail.Ra
 		body = extractAttributedBodyText(msg.AttributedBody)
 	}
 
-	// Build MIME
-	mimeData := buildMIME(fromAddr, toAddrs, msgDate, msg.GUID, body)
-
-	// Determine thread ID
-	threadID := "no-chat-" + messageID
-	if msg.ChatGUID != nil {
-		threadID = *msg.ChatGUID
-	}
-
-	// Build label based on service
-	var labelIDs []string
-	if msg.Service != nil && *msg.Service != "" {
-		labelIDs = []string{*msg.Service}
-	}
-
-	// InternalDate as Unix milliseconds
-	internalDate := int64(0)
+	msgDate := appleTimestampToTime(msg.Date)
+	var sentAt sql.NullTime
 	if !msgDate.IsZero() {
-		internalDate = msgDate.UnixMilli()
+		sentAt = sql.NullTime{Time: msgDate, Valid: true}
 	}
 
-	return &gmail.RawMessage{
-		ID:           messageID,
-		ThreadID:     threadID,
-		LabelIDs:     labelIDs,
-		Snippet:      snippet(body, 100),
-		HistoryID:    uint64(msg.ROWID),
-		InternalDate: internalDate,
-		SizeEstimate: int64(len(mimeData)),
-		Raw:          mimeData,
-	}, nil
-}
+	// Upsert the message
+	msgID, err := s.UpsertMessage(&store.Message{
+		SourceID:        sourceID,
+		SourceMessageID: strconv.FormatInt(msg.ROWID, 10),
+		ConversationID:  convID,
+		MessageType:     msgType,
+		SentAt:          sentAt,
+		InternalDate:    sentAt,
+		SenderID:        senderID,
+		IsFromMe:        msg.IsFromMe != 0,
+		Snippet: sql.NullString{
+			String: snippet(body, 100),
+			Valid:  body != "",
+		},
+		SizeEstimate:   int64(len(body)),
+		HasAttachments: msg.HasAttachments != 0,
+	})
+	if err != nil {
+		return fmt.Errorf("upsert message: %w", err)
+	}
 
-// resolveParticipants determines the From and To addresses for a message.
-func (c *Client) resolveParticipants(ctx context.Context, msg *messageRow) (from []string, to []string) {
-	if msg.IsFromMe != 0 {
-		// Sender is the device owner
-		from = []string{c.myAddress}
-		// Recipients are the chat participants
-		if msg.ChatROWID != nil {
-			to = c.getChatParticipants(ctx, *msg.ChatROWID)
-		} else if msg.HandleID != nil {
-			email, _, _ := normalizeIdentifier(*msg.HandleID)
-			if email != "" {
-				to = []string{email}
-			}
-		}
-	} else {
-		// Sender is from the handle table
-		if msg.HandleID != nil {
-			email, _, _ := normalizeIdentifier(*msg.HandleID)
-			if email != "" {
-				from = []string{email}
-			}
-		}
-		// Recipient is the device owner (and possibly other participants in group chats)
-		to = []string{c.myAddress}
-		if msg.ChatROWID != nil {
-			others := c.getChatParticipants(ctx, *msg.ChatROWID)
-			// Add other participants (exclude the sender)
-			senderAddr := ""
-			if len(from) > 0 {
-				senderAddr = from[0]
-			}
-			for _, addr := range others {
-				if addr != senderAddr && addr != c.myAddress {
-					to = append(to, addr)
-				}
-			}
+	// Store body text directly (no MIME)
+	if body != "" {
+		if err := s.UpsertMessageBody(
+			msgID,
+			sql.NullString{String: body, Valid: true},
+			sql.NullString{},
+		); err != nil {
+			return fmt.Errorf("upsert body: %w", err)
 		}
 	}
-	return from, to
+
+	// Label: iMessage or SMS
+	labelID := imessageLabelID
+	if msgType == "sms" {
+		labelID = smsLabelID
+	}
+	if err := s.LinkMessageLabel(msgID, labelID); err != nil {
+		return fmt.Errorf("link label: %w", err)
+	}
+
+	// Warn about attachments
+	if msg.HasAttachments != 0 {
+		c.logger.Debug(
+			"message has attachments (extraction not yet implemented)",
+			"rowid", msg.ROWID,
+		)
+	}
+
+	summary.MessagesImported++
+	return nil
 }
 
-// getChatParticipants returns the normalized email addresses of all participants
-// in a chat (excluding the device owner).
-func (c *Client) getChatParticipants(ctx context.Context, chatROWID int64) []string {
+// ensureConversation gets or creates a conversation for the chat,
+// resolving participants and setting the title.
+func (c *Client) ensureConversation(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+	msg *messageRow,
+	chatGUID string,
+	convCache map[string]int64,
+	phoneCache map[string]int64,
+	emailCache map[string]int64,
+	summary *ImportSummary,
+) (int64, bool, error) {
+	if id, ok := convCache[chatGUID]; ok {
+		return id, false, nil
+	}
+
+	// Determine conversation type and title
+	convType := "direct_chat"
+	title := ""
+	if msg.ChatIdentifier != nil &&
+		strings.Contains(*msg.ChatIdentifier, "chat;+;") {
+		convType = "group_chat"
+	}
+
+	if msg.ChatDisplayName != nil && *msg.ChatDisplayName != "" {
+		title = *msg.ChatDisplayName
+	} else if convType == "direct_chat" && msg.HandleID != nil {
+		// For 1:1 chats, use the participant's phone/email as title
+		phone, email, name := resolveHandle(*msg.HandleID)
+		if name != "" {
+			title = name
+		} else if phone != "" {
+			title = phone
+		} else if email != "" {
+			title = email
+		}
+	}
+
+	convID, err := s.EnsureConversationWithType(
+		sourceID, chatGUID, convType, title,
+	)
+	if err != nil {
+		return 0, false, err
+	}
+	convCache[chatGUID] = convID
+
+	// Link chat participants to the conversation
+	if msg.ChatROWID != nil {
+		c.linkChatParticipants(
+			ctx, s, *msg.ChatROWID, convID,
+			phoneCache, emailCache, summary,
+		)
+	}
+
+	return convID, true, nil
+}
+
+// linkChatParticipants resolves all handles in a chat and links them
+// as conversation participants.
+func (c *Client) linkChatParticipants(
+	ctx context.Context,
+	s *store.Store,
+	chatROWID, convID int64,
+	phoneCache map[string]int64,
+	emailCache map[string]int64,
+	summary *ImportSummary,
+) {
 	rows, err := c.db.QueryContext(ctx, `
 		SELECT h.id
 		FROM chat_handle_join chj
@@ -400,61 +477,68 @@ func (c *Client) getChatParticipants(ctx context.Context, chatROWID int64) []str
 		WHERE chj.chat_id = ?
 	`, chatROWID)
 	if err != nil {
-		c.logger.Warn("failed to get chat participants", "chat_id", chatROWID, "error", err)
-		return nil
+		c.logger.Warn(
+			"failed to get chat participants",
+			"chat_id", chatROWID, "error", err,
+		)
+		return
 	}
 	defer func() { _ = rows.Close() }()
 
-	var addrs []string
 	for rows.Next() {
 		var handleID string
 		if err := rows.Scan(&handleID); err != nil {
 			continue
 		}
-		email, _, _ := normalizeIdentifier(handleID)
-		if email != "" {
-			addrs = append(addrs, email)
-		}
-	}
-	return addrs
-}
-
-// GetMessagesRawBatch fetches multiple messages sequentially.
-// Since we're reading from a local database, parallelism adds no benefit.
-func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) ([]*gmail.RawMessage, error) {
-	results := make([]*gmail.RawMessage, 0, len(messageIDs))
-	for _, id := range messageIDs {
-		msg, err := c.GetMessageRaw(ctx, id)
-		if err != nil {
-			c.logger.Warn("failed to fetch message", "id", id, "error", err)
+		pid, err := c.resolveParticipant(
+			s, handleID, phoneCache, emailCache, summary,
+		)
+		if err != nil || pid == 0 {
 			continue
 		}
-		results = append(results, msg)
+		_ = s.EnsureConversationParticipant(convID, pid, "member")
 	}
-	return results, nil
 }
 
-// ListHistory is not supported for iMessage (no incremental sync yet).
-func (c *Client) ListHistory(ctx context.Context, startHistoryID uint64, pageToken string) (*gmail.HistoryResponse, error) {
-	return &gmail.HistoryResponse{
-		HistoryID: startHistoryID,
-	}, nil
-}
+// resolveParticipant resolves a handle ID to a participant ID in the
+// store, creating the participant if needed.
+func (c *Client) resolveParticipant(
+	s *store.Store,
+	handleID string,
+	phoneCache map[string]int64,
+	emailCache map[string]int64,
+	summary *ImportSummary,
+) (int64, error) {
+	phone, email, _ := resolveHandle(handleID)
 
-// TrashMessage is not supported for iMessage.
-func (c *Client) TrashMessage(ctx context.Context, messageID string) error {
-	return fmt.Errorf("trash not supported for iMessage")
-}
+	if phone != "" {
+		if pid, ok := phoneCache[phone]; ok {
+			return pid, nil
+		}
+		pid, err := s.EnsureParticipantByPhone(phone, phone, "imessage")
+		if err != nil {
+			return 0, fmt.Errorf("ensure participant by phone %s: %w", phone, err)
+		}
+		phoneCache[phone] = pid
+		summary.ParticipantsResolved++
+		return pid, nil
+	}
 
-// DeleteMessage is not supported for iMessage.
-func (c *Client) DeleteMessage(ctx context.Context, messageID string) error {
-	return fmt.Errorf("delete not supported for iMessage")
-}
+	if email != "" {
+		if pid, ok := emailCache[email]; ok {
+			return pid, nil
+		}
+		result, err := s.EnsureParticipantsBatch([]mime.Address{
+			{Email: email},
+		})
+		if err != nil {
+			return 0, fmt.Errorf("ensure participant by email %s: %w", email, err)
+		}
+		pid := result[email]
+		emailCache[email] = pid
+		summary.ParticipantsResolved++
+		return pid, nil
+	}
 
-// BatchDeleteMessages is not supported for iMessage.
-func (c *Client) BatchDeleteMessages(ctx context.Context, messageIDs []string) error {
-	return fmt.Errorf("batch delete not supported for iMessage")
+	return 0, nil
 }
-
-// Ensure Client implements gmail.API.
-var _ gmail.API = (*Client)(nil)

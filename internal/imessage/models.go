@@ -1,5 +1,5 @@
-// Package imessage provides an iMessage client that reads from macOS's chat.db
-// and implements the gmail.API interface for use with the existing sync infrastructure.
+// Package imessage reads from macOS's iMessage chat.db and imports
+// messages into the msgvault store.
 package imessage
 
 // messageRow holds a row from the iMessage chat.db message table
@@ -18,4 +18,12 @@ type messageRow struct {
 	ChatGUID        *string // chat.guid, used as conversation/thread ID
 	ChatDisplayName *string // chat.display_name (set for group chats)
 	ChatIdentifier  *string // chat.chat_identifier
+}
+
+// ImportSummary holds statistics from a completed import run.
+type ImportSummary struct {
+	MessagesImported      int
+	ConversationsImported int
+	ParticipantsResolved  int
+	Skipped               int
 }

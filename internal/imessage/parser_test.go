@@ -1,7 +1,6 @@
 package imessage
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -91,132 +90,83 @@ func TestRoundTripTimestamp(t *testing.T) {
 	}
 }
 
-func TestNormalizeIdentifier(t *testing.T) {
+func TestResolveHandle(t *testing.T) {
 	tests := []struct {
-		name       string
-		handleID   string
-		wantEmail  string
-		wantDomain string
+		name            string
+		handleID        string
+		wantPhone       string
+		wantEmail       string
+		wantDisplayName string
 	}{
 		{
-			name:       "email address",
-			handleID:   "John@Example.com",
-			wantEmail:  "john@example.com",
-			wantDomain: "example.com",
+			name:      "email address",
+			handleID:  "John@Example.com",
+			wantEmail: "john@example.com",
 		},
 		{
-			name:       "US phone with +1",
-			handleID:   "+15551234567",
-			wantEmail:  "+15551234567@phone.imessage",
-			wantDomain: "phone.imessage",
+			name:            "US phone with +1",
+			handleID:        "+15551234567",
+			wantPhone:       "+15551234567",
+			wantDisplayName: "+15551234567",
 		},
 		{
-			name:       "US phone 10 digits",
-			handleID:   "5551234567",
-			wantEmail:  "+15551234567@phone.imessage",
-			wantDomain: "phone.imessage",
+			name:            "US phone 10 digits",
+			handleID:        "5551234567",
+			wantPhone:       "+15551234567",
+			wantDisplayName: "+15551234567",
 		},
 		{
-			name:       "US phone with formatting",
-			handleID:   "(555) 123-4567",
-			wantEmail:  "+15551234567@phone.imessage",
-			wantDomain: "phone.imessage",
+			name:            "US phone with formatting",
+			handleID:        "(555) 123-4567",
+			wantPhone:       "+15551234567",
+			wantDisplayName: "+15551234567",
 		},
 		{
-			name:       "US phone 11 digits with 1",
-			handleID:   "15551234567",
-			wantEmail:  "+15551234567@phone.imessage",
-			wantDomain: "phone.imessage",
+			name:            "US phone 11 digits with 1",
+			handleID:        "15551234567",
+			wantPhone:       "+15551234567",
+			wantDisplayName: "+15551234567",
 		},
 		{
-			name:       "international phone",
-			handleID:   "+447911123456",
-			wantEmail:  "+447911123456@phone.imessage",
-			wantDomain: "phone.imessage",
+			name:            "international phone",
+			handleID:        "+447911123456",
+			wantPhone:       "+447911123456",
+			wantDisplayName: "+447911123456",
 		},
 		{
-			name:       "empty string",
-			handleID:   "",
-			wantEmail:  "",
-			wantDomain: "",
+			name: "empty string",
+		},
+		{
+			name:            "short code (not a phone)",
+			handleID:        "12345",
+			wantDisplayName: "12345",
+		},
+		{
+			name:            "handle with digits parses as phone",
+			handleID:        "p:+1555123",
+			wantPhone:       "+1555123",
+			wantDisplayName: "+1555123",
+		},
+		{
+			name:            "system handle without digits",
+			handleID:        "system",
+			wantDisplayName: "system",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotEmail, gotDomain, _ := normalizeIdentifier(tt.handleID)
+			gotPhone, gotEmail, gotDisplay := resolveHandle(tt.handleID)
+			if gotPhone != tt.wantPhone {
+				t.Errorf("phone: got %q, want %q", gotPhone, tt.wantPhone)
+			}
 			if gotEmail != tt.wantEmail {
 				t.Errorf("email: got %q, want %q", gotEmail, tt.wantEmail)
 			}
-			if gotDomain != tt.wantDomain {
-				t.Errorf("domain: got %q, want %q", gotDomain, tt.wantDomain)
+			if gotDisplay != tt.wantDisplayName {
+				t.Errorf("displayName: got %q, want %q", gotDisplay, tt.wantDisplayName)
 			}
 		})
-	}
-}
-
-func TestBuildMIME(t *testing.T) {
-	date := time.Date(2024, 6, 15, 14, 30, 0, 0, time.UTC)
-	mime := buildMIME(
-		[]string{"sender@example.com"},
-		[]string{"recipient@example.com", "other@example.com"},
-		date,
-		"p:0/ABC123",
-		"Hello, world!",
-	)
-
-	mimeStr := string(mime)
-
-	// Check required headers
-	if !strings.Contains(mimeStr, "From: <sender@example.com>") {
-		t.Error("missing or incorrect From header")
-	}
-	if !strings.Contains(mimeStr, "To: <recipient@example.com>, <other@example.com>") {
-		t.Error("missing or incorrect To header")
-	}
-	if !strings.Contains(mimeStr, "Date: ") {
-		t.Error("missing Date header")
-	}
-	// Message-ID is a hash of the GUID (RFC 5322 safe)
-	if !strings.Contains(mimeStr, "Message-ID: <") || !strings.Contains(mimeStr, "@imessage.local>") {
-		t.Error("missing Message-ID header")
-	}
-	// Verify the raw GUID with invalid chars is NOT present
-	if strings.Contains(mimeStr, "p:0/ABC123@imessage.local") {
-		t.Error("Message-ID should not contain raw GUID with invalid chars")
-	}
-	if !strings.Contains(mimeStr, "Content-Type: text/plain; charset=utf-8") {
-		t.Error("missing Content-Type header")
-	}
-	if !strings.Contains(mimeStr, "MIME-Version: 1.0") {
-		t.Error("missing MIME-Version header")
-	}
-	// Check body is after blank line
-	if !strings.Contains(mimeStr, "\r\n\r\nHello, world!") {
-		t.Error("body not found after header separator")
-	}
-}
-
-func TestBuildMIME_EmptyBody(t *testing.T) {
-	date := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	mime := buildMIME(
-		[]string{"sender@example.com"},
-		[]string{"recipient@example.com"},
-		date,
-		"test-guid",
-		"",
-	)
-
-	mimeStr := string(mime)
-
-	// Should still have headers and separator
-	if !strings.Contains(mimeStr, "\r\n\r\n") {
-		t.Error("missing header/body separator")
-	}
-	// Body should be empty
-	parts := strings.SplitN(mimeStr, "\r\n\r\n", 2)
-	if len(parts) != 2 || parts[1] != "" {
-		t.Errorf("expected empty body, got %q", parts[1])
 	}
 }
 
