@@ -59,23 +59,42 @@ func TestRecomputeConversationStats(t *testing.T) {
 		t.Fatalf("UpsertMessage msg2: %v", err)
 	}
 
+	// Add a conversation participant so participant_count is non-zero.
+	participantID, err := st.EnsureParticipantByPhone("+15559876543", "Bob", "whatsapp")
+	if err != nil {
+		t.Fatalf("EnsureParticipantByPhone: %v", err)
+	}
+	if err := st.EnsureConversationParticipant(convID, participantID, "member"); err != nil {
+		t.Fatalf("EnsureConversationParticipant: %v", err)
+	}
+
 	// Recompute and verify counts.
 	if err := st.RecomputeConversationStats(source.ID); err != nil {
 		t.Fatalf("RecomputeConversationStats: %v", err)
 	}
 
 	var count int
+	var participantCount int
 	var lastMsgAt sql.NullTime
+	var preview sql.NullString
 	if err := st.DB().QueryRow(
-		`SELECT message_count, last_message_at FROM conversations WHERE id = ?`, convID,
-	).Scan(&count, &lastMsgAt); err != nil {
+		`SELECT message_count, participant_count, last_message_at, last_message_preview
+		 FROM conversations WHERE id = ?`, convID,
+	).Scan(&count, &participantCount, &lastMsgAt, &preview); err != nil {
 		t.Fatalf("post-recompute scan: %v", err)
 	}
 	if count != 2 {
 		t.Errorf("message_count = %d, want 2", count)
 	}
+	if participantCount != 1 {
+		t.Errorf("participant_count = %d, want 1", participantCount)
+	}
 	if !lastMsgAt.Valid {
 		t.Error("last_message_at is NULL, want a timestamp")
+	}
+	// msg2 has the later sent_at, so its snippet ("world") should be the preview.
+	if !preview.Valid || preview.String != "world" {
+		t.Errorf("last_message_preview = %q, want %q", preview.String, "world")
 	}
 
 	// Idempotency: calling again should produce the same result.

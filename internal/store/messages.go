@@ -893,7 +893,7 @@ func (s *Store) RecomputeConversationStats(sourceID int64) error {
 			last_message_preview = (
 				SELECT snippet FROM messages
 				WHERE conversation_id = conversations.id
-				ORDER BY COALESCE(sent_at, received_at, internal_date) DESC
+				ORDER BY COALESCE(sent_at, received_at, internal_date) DESC, id DESC
 				LIMIT 1
 			)
 		WHERE source_id = ?
