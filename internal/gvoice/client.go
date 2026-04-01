@@ -143,6 +143,15 @@ func (c *Client) Import(
 	convCache := map[string]int64{}  // threadID → conversationID
 	imported := 0
 
+	// Resolve owner participant once for all messages
+	ownerID, err := c.resolveParticipant(
+		s, c.owner.GoogleVoice, "",
+		phoneCache, summary,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("resolve owner: %w", err)
+	}
+
 	for _, entry := range c.index {
 		if err := ctx.Err(); err != nil {
 			return summary, err
@@ -154,7 +163,7 @@ func (c *Client) Import(
 		switch entry.FileType {
 		case fileTypeText, fileTypeGroup:
 			n, err := c.importTextEntry(
-				ctx, s, sourceID, &entry,
+				ctx, s, sourceID, &entry, ownerID,
 				labelIDs, phoneCache, convCache, summary,
 			)
 			if err != nil {
@@ -170,7 +179,7 @@ func (c *Client) Import(
 
 		default:
 			if err := c.importCallEntry(
-				ctx, s, sourceID, &entry,
+				ctx, s, sourceID, &entry, ownerID,
 				labelIDs, phoneCache, convCache, summary,
 			); err != nil {
 				c.logger.Warn(
@@ -214,6 +223,7 @@ func (c *Client) importTextEntry(
 	s *store.Store,
 	sourceID int64,
 	entry *indexEntry,
+	ownerID int64,
 	labelIDs map[string]int64,
 	phoneCache map[string]int64,
 	convCache map[string]int64,
@@ -265,12 +275,8 @@ func (c *Client) importTextEntry(
 		_ = s.EnsureConversationParticipant(convID, senderID, "member")
 	}
 
-	// Ensure owner as participant
-	ownerID, err := c.resolveParticipant(
-		s, c.owner.GoogleVoice, "",
-		phoneCache, summary,
-	)
-	if err == nil && ownerID > 0 {
+	// Ensure owner as conversation participant
+	if ownerID > 0 {
 		_ = s.EnsureConversationParticipant(convID, ownerID, "member")
 	}
 
@@ -327,6 +333,22 @@ func (c *Client) importTextEntry(
 		return 0, fmt.Errorf("upsert message body: %w", err)
 	}
 
+	// Store raw HTML
+	rawData, rErr := os.ReadFile(entry.FilePath)
+	if rErr == nil {
+		_ = s.UpsertMessageRawWithFormat(
+			msgID, rawData, "gvoice_html",
+		)
+	}
+
+	// Write message_recipients
+	if err := c.writeTextRecipients(
+		s, msgID, msg, ownerID, senderID, entry.FileType,
+		groupParticipants, phoneCache, summary,
+	); err != nil {
+		return 0, fmt.Errorf("write message recipients: %w", err)
+	}
+
 	// Link labels
 	for _, labelName := range entry.Labels {
 		if lid, ok := labelIDs[labelName]; ok {
@@ -349,6 +371,7 @@ func (c *Client) importCallEntry(
 	s *store.Store,
 	sourceID int64,
 	entry *indexEntry,
+	ownerID int64,
 	labelIDs map[string]int64,
 	phoneCache map[string]int64,
 	convCache map[string]int64,
@@ -388,12 +411,8 @@ func (c *Client) importCallEntry(
 		)
 	}
 
-	// Ensure owner as participant
-	ownerID, err := c.resolveParticipant(
-		s, c.owner.GoogleVoice, "",
-		phoneCache, summary,
-	)
-	if err == nil && ownerID > 0 {
+	// Ensure owner as conversation participant
+	if ownerID > 0 {
 		_ = s.EnsureConversationParticipant(
 			convID, ownerID, "member",
 		)
@@ -475,6 +494,13 @@ func (c *Client) importCallEntry(
 		)
 	}
 
+	// Write message_recipients
+	if err := writeCallRecipients(
+		s, msgID, ownerID, contactID, record.CallType,
+	); err != nil {
+		return fmt.Errorf("write message recipients: %w", err)
+	}
+
 	// Link labels
 	for _, labelName := range entry.Labels {
 		if lid, ok := labelIDs[labelName]; ok {
@@ -483,6 +509,123 @@ func (c *Client) importCallEntry(
 	}
 
 	summary.MessagesImported++
+	return nil
+}
+
+// writeTextRecipients writes from/to rows for a text message.
+// IsMe=true: from=owner, to=contact(s). IsMe=false: from=sender, to=owner.
+func (c *Client) writeTextRecipients(
+	s *store.Store,
+	msgID int64,
+	msg textMessage,
+	ownerID, senderID int64,
+	ft fileType,
+	groupParticipants []string,
+	phoneCache map[string]int64,
+	summary *ImportSummary,
+) error {
+	if msg.IsMe {
+		// From: owner
+		if ownerID > 0 {
+			if err := s.ReplaceMessageRecipients(
+				msgID, "from", []int64{ownerID}, nil,
+			); err != nil {
+				return err
+			}
+		}
+		// To: group participants or the contact
+		toIDs := c.collectRecipientIDs(
+			s, ft, senderID, groupParticipants,
+			phoneCache, summary,
+		)
+		if len(toIDs) > 0 {
+			if err := s.ReplaceMessageRecipients(
+				msgID, "to", toIDs, nil,
+			); err != nil {
+				return err
+			}
+		}
+	} else {
+		// From: external sender
+		if senderID > 0 {
+			if err := s.ReplaceMessageRecipients(
+				msgID, "from", []int64{senderID}, nil,
+			); err != nil {
+				return err
+			}
+		}
+		// To: owner
+		if ownerID > 0 {
+			if err := s.ReplaceMessageRecipients(
+				msgID, "to", []int64{ownerID}, nil,
+			); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// collectRecipientIDs returns the "to" participant IDs for an
+// outgoing text message. For group chats, all group participants
+// (excluding the owner). For direct chats, the contact sender ID.
+func (c *Client) collectRecipientIDs(
+	s *store.Store,
+	ft fileType,
+	contactID int64,
+	groupParticipants []string,
+	phoneCache map[string]int64,
+	summary *ImportSummary,
+) []int64 {
+	if ft == fileTypeGroup && len(groupParticipants) > 0 {
+		var ids []int64
+		for _, phone := range groupParticipants {
+			pid, err := c.resolveParticipant(
+				s, phone, "", phoneCache, summary,
+			)
+			if err == nil && pid > 0 {
+				ids = append(ids, pid)
+			}
+		}
+		return ids
+	}
+	if contactID > 0 {
+		return []int64{contactID}
+	}
+	return nil
+}
+
+// writeCallRecipients writes from/to rows for a call record.
+// Placed calls: from=owner, to=contact.
+// Received/missed/voicemail: from=contact, to=owner.
+func writeCallRecipients(
+	s *store.Store,
+	msgID, ownerID, contactID int64,
+	callType fileType,
+) error {
+	var fromID, toID int64
+	switch callType {
+	case fileTypePlaced:
+		fromID = ownerID
+		toID = contactID
+	default:
+		fromID = contactID
+		toID = ownerID
+	}
+	if fromID > 0 {
+		if err := s.ReplaceMessageRecipients(
+			msgID, "from", []int64{fromID}, nil,
+		); err != nil {
+			return err
+		}
+	}
+	if toID > 0 {
+		if err := s.ReplaceMessageRecipients(
+			msgID, "to", []int64{toID}, nil,
+		); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
