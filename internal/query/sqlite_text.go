@@ -181,7 +181,7 @@ func (e *SQLiteEngine) ListConversations(
 				(SELECT m2.snippet FROM messages m2
 				 WHERE m2.conversation_id = c.id
 				   AND %s
-				 ORDER BY m2.sent_at DESC LIMIT 1),
+				 ORDER BY m2.sent_at DESC, m2.id DESC LIMIT 1),
 				''
 			) AS last_preview,
 			COALESCE(SUM(m.size_estimate), 0) AS total_size

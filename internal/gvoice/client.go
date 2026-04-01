@@ -285,6 +285,11 @@ func (c *Client) importTextEntry(
 		_ = s.EnsureConversationParticipant(convID, senderID, "member")
 	}
 
+	// Ensure the resolved contact is a conversation participant.
+	if contactID > 0 && contactID != senderID {
+		_ = s.EnsureConversationParticipant(convID, contactID, "member")
+	}
+
 	// Ensure owner as conversation participant
 	if ownerID > 0 {
 		_ = s.EnsureConversationParticipant(convID, ownerID, "member")
@@ -546,17 +551,16 @@ func (c *Client) writeTextRecipients(
 			}
 		}
 		// To: group participants or the contact (not the sender, who is
-		// the owner for outbound messages)
+		// the owner for outbound messages).
+		// Always call Replace even with an empty slice to clear stale rows.
 		toIDs := c.collectRecipientIDs(
 			s, ft, contactID, groupParticipants,
 			phoneCache, summary,
 		)
-		if len(toIDs) > 0 {
-			if err := s.ReplaceMessageRecipients(
-				msgID, "to", toIDs, nil,
-			); err != nil {
-				return err
-			}
+		if err := s.ReplaceMessageRecipients(
+			msgID, "to", toIDs, nil,
+		); err != nil {
+			return err
 		}
 	} else {
 		// From: external sender
@@ -567,13 +571,15 @@ func (c *Client) writeTextRecipients(
 				return err
 			}
 		}
-		// To: owner
+		// To: owner. Always call Replace to clear stale rows on re-import.
+		var toIDs []int64
 		if ownerID > 0 {
-			if err := s.ReplaceMessageRecipients(
-				msgID, "to", []int64{ownerID}, nil,
-			); err != nil {
-				return err
-			}
+			toIDs = []int64{ownerID}
+		}
+		if err := s.ReplaceMessageRecipients(
+			msgID, "to", toIDs, nil,
+		); err != nil {
+			return err
 		}
 	}
 	return nil

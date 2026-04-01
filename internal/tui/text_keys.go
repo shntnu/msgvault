@@ -124,11 +124,35 @@ func (m Model) handleTextTimelineKeys(
 		return m, nil
 
 	case "pgup", "ctrl+u":
-		m.textMoveCursor(-m.visibleRows())
+		step := m.visibleRows()
+		m.textState.cursor -= step
+		m.textState.scrollOffset -= step
+		if m.textState.cursor < 0 {
+			m.textState.cursor = 0
+		}
+		if m.textState.scrollOffset < 0 {
+			m.textState.scrollOffset = 0
+		}
 		return m, nil
 
 	case "pgdown", "ctrl+d":
-		m.textMoveCursor(m.visibleRows())
+		itemCount := m.textRowCount()
+		step := m.visibleRows()
+		m.textState.cursor += step
+		m.textState.scrollOffset += step
+		if m.textState.cursor >= itemCount {
+			m.textState.cursor = itemCount - 1
+		}
+		if m.textState.cursor < 0 {
+			m.textState.cursor = 0
+		}
+		maxScroll := itemCount - m.visibleRows()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if m.textState.scrollOffset > maxScroll {
+			m.textState.scrollOffset = maxScroll
+		}
 		return m, nil
 
 	case "home":
@@ -206,8 +230,10 @@ func (m *Model) cycleTextViewType(forward bool) {
 	}
 	if m.textState.viewType == query.TextViewConversations {
 		m.textState.level = textLevelConversations
+		m.textState.filter.SortField = query.TextSortByLastMessage
 	} else {
 		m.textState.level = textLevelAggregate
+		m.textState.filter.SortField = query.TextSortByCount
 	}
 	m.textState.cursor = 0
 	m.textState.scrollOffset = 0
@@ -260,10 +286,33 @@ func (m *Model) navigateTextList(key string, itemCount int) bool {
 		}
 		return true
 	case "pgup", "ctrl+u":
-		m.textMoveCursor(-m.visibleRows())
+		step := m.visibleRows()
+		m.textState.cursor -= step
+		m.textState.scrollOffset -= step
+		if m.textState.cursor < 0 {
+			m.textState.cursor = 0
+		}
+		if m.textState.scrollOffset < 0 {
+			m.textState.scrollOffset = 0
+		}
 		return true
 	case "pgdown", "ctrl+d":
-		m.textMoveCursor(m.visibleRows())
+		step := m.visibleRows()
+		m.textState.cursor += step
+		m.textState.scrollOffset += step
+		if m.textState.cursor >= itemCount {
+			m.textState.cursor = itemCount - 1
+		}
+		if m.textState.cursor < 0 {
+			m.textState.cursor = 0
+		}
+		maxScroll := itemCount - m.visibleRows()
+		if maxScroll < 0 {
+			maxScroll = 0
+		}
+		if m.textState.scrollOffset > maxScroll {
+			m.textState.scrollOffset = maxScroll
+		}
 		return true
 	case "home":
 		m.textState.cursor = 0

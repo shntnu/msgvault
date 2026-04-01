@@ -152,6 +152,36 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
+	// --- Message with NULL sender_id (backward-compatibility) ---
+	// Some older imports only have message_recipients "from" rows, not sender_id.
+	// Verify that TextAggregate still picks these up via the COALESCE fallback.
+	{
+		msg := &store.Message{
+			SourceID:        src2.ID,
+			SourceMessageID: "am-null-sender",
+			ConversationID:  conv2ID,
+			MessageType:     "imessage",
+			Snippet:         sql.NullString{String: "Null sender msg", Valid: true},
+			SentAt:          sql.NullTime{Time: baseTime.Add(2 * time.Hour), Valid: true},
+			SizeEstimate:    15,
+			SenderID:        sql.NullInt64{}, // NULL
+		}
+		msgID, err := s.UpsertMessage(msg)
+		if err != nil {
+			t.Fatalf("UpsertMessage(am-null-sender): %v", err)
+		}
+		bodyText := sql.NullString{String: "Null sender msg", Valid: true}
+		if err := s.UpsertMessageBody(msgID, bodyText, sql.NullString{}); err != nil {
+			t.Fatalf("UpsertMessageBody(am-null-sender): %v", err)
+		}
+		if err := s.ReplaceMessageRecipients(
+			msgID, "from",
+			[]int64{phoneParticipantID}, []string{"Alice"},
+		); err != nil {
+			t.Fatalf("ReplaceMessageRecipients(am-null-sender): %v", err)
+		}
+	}
+
 	// --- Labels ---
 	labelID, err := s.EnsureLabel(src1.ID, "important", "Important", "user")
 	if err != nil {
@@ -215,7 +245,7 @@ func TestIntegration(t *testing.T) {
 		convByID[row.ConversationID] = row
 	}
 	wantConv1LastAt := baseTime.Add(2 * time.Minute)
-	wantConv2LastAt := baseTime.Add(time.Hour + time.Minute)
+	wantConv2LastAt := baseTime.Add(2 * time.Hour)
 	if row, ok := convByID[conv1ID]; !ok {
 		t.Errorf("conv1 not found in ListConversations results")
 	} else {
@@ -231,8 +261,8 @@ func TestIntegration(t *testing.T) {
 	if row, ok := convByID[conv2ID]; !ok {
 		t.Errorf("conv2 not found in ListConversations results")
 	} else {
-		if row.MessageCount != 2 {
-			t.Errorf("conv2 MessageCount: got %d, want 2", row.MessageCount)
+		if row.MessageCount != 3 {
+			t.Errorf("conv2 MessageCount: got %d, want 3", row.MessageCount)
 		}
 		if row.LastMessageAt.IsZero() {
 			t.Error("conv2 LastMessageAt is zero")
@@ -242,7 +272,8 @@ func TestIntegration(t *testing.T) {
 	}
 
 	// TextAggregate by contacts — groups by phone number.
-	// All 5 messages have +15551234567 as the from participant.
+	// All 6 messages have +15551234567 as the from participant
+	// (5 via sender_id, 1 via message_recipients fallback with NULL sender_id).
 	aggRows, err := te.TextAggregate(ctx, query.TextViewContacts, query.TextAggregateOptions{Limit: 100})
 	if err != nil {
 		t.Fatalf("TextAggregate(TextViewContacts): %v", err)
@@ -254,8 +285,8 @@ func TestIntegration(t *testing.T) {
 	for _, row := range aggRows {
 		if row.Key == "+15551234567" {
 			foundPhone = true
-			if row.Count != 5 {
-				t.Errorf("contact +15551234567: got count %d, want 5", row.Count)
+			if row.Count != 6 {
+				t.Errorf("contact +15551234567: got count %d, want 6", row.Count)
 			}
 		}
 	}
@@ -284,13 +315,13 @@ func TestIntegration(t *testing.T) {
 		}
 	}
 
-	// GetTextStats — should count all 5 text messages.
+	// GetTextStats — should count all 6 text messages.
 	stats, err := te.GetTextStats(ctx, query.TextStatsOptions{})
 	if err != nil {
 		t.Fatalf("GetTextStats: %v", err)
 	}
-	if stats.MessageCount != 5 {
-		t.Errorf("GetTextStats.MessageCount: got %d, want 5", stats.MessageCount)
+	if stats.MessageCount != 6 {
+		t.Errorf("GetTextStats.MessageCount: got %d, want 6", stats.MessageCount)
 	}
 	// Should see 2 accounts (sources).
 	if stats.AccountCount != 2 {

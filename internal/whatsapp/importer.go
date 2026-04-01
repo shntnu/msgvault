@@ -393,9 +393,18 @@ func (imp *Importer) Import(ctx context.Context, waDBPath string, opts ImportOpt
 					} else {
 						// No media stored — clear attachment flags set by mapMessage
 						// so Parquet/TUI queries don't show phantom attachments.
-						_, _ = imp.store.DB().Exec(
-							"UPDATE messages SET has_attachments = 0, attachment_count = 0 WHERE id = ?",
-							messageID)
+						// Only clear if the message has no pre-existing attachment rows
+						// (a previous import with --media-dir may have created them).
+						var existingCount int
+						_ = imp.store.DB().QueryRow(
+							"SELECT COUNT(*) FROM attachments WHERE message_id = ?",
+							messageID,
+						).Scan(&existingCount)
+						if existingCount == 0 {
+							_, _ = imp.store.DB().Exec(
+								"UPDATE messages SET has_attachments = 0, attachment_count = 0 WHERE id = ?",
+								messageID)
+						}
 					}
 
 					// Store media metadata in the attachments table is done above.

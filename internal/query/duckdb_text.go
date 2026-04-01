@@ -134,7 +134,7 @@ func (e *DuckDBEngine) ListConversations(
 				COUNT(DISTINCT COALESCE(msg.sender_id, 0)) AS participant_count,
 				MAX(msg.sent_at) AS last_message_at,
 				COALESCE(SUM(CAST(msg.size_estimate AS BIGINT)), 0) AS total_size,
-				FIRST(msg.snippet ORDER BY msg.sent_at DESC) AS last_preview,
+				FIRST(msg.snippet ORDER BY msg.sent_at DESC, msg.id DESC) AS last_preview,
 				FIRST(msg.source_id) AS source_id
 			FROM msg
 			WHERE %s

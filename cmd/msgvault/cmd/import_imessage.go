@@ -74,12 +74,17 @@ func runImportImessage(cmd *cobra.Command, _ []string) error {
 	}
 	defer func() { _ = client.Close() }()
 
-	// Get or create the source. Always use "local" — there is only one
-	// iMessage database per machine. The --me flag affects participant
-	// resolution only, not the source identifier.
-	src, err := s.GetOrCreateSource("apple_messages", "local")
-	if err != nil {
-		return fmt.Errorf("get or create source: %w", err)
+	// Reuse any existing apple_messages source to preserve dedup keys
+	// from previous imports (which may have used --me as the identifier).
+	var src *store.Source
+	existingSources, listErr := s.ListSources("apple_messages")
+	if listErr == nil && len(existingSources) > 0 {
+		src = existingSources[0]
+	} else {
+		src, err = s.GetOrCreateSource("apple_messages", "local")
+		if err != nil {
+			return fmt.Errorf("get or create source: %w", err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(cmd.Context())

@@ -137,10 +137,17 @@ func (m Model) loadTextSearch(searchQuery string) tea.Cmd {
 	)
 }
 
-// loadTextData dispatches the appropriate load command based on current view type.
+// loadTextData dispatches the appropriate load command based on the current
+// navigation level. Checking level (not just viewType) is necessary because
+// drill-down from an aggregate keeps the aggregate viewType but should load
+// conversations.
 func (m Model) loadTextData() tea.Cmd {
-	if m.textState.viewType == query.TextViewConversations {
+	switch m.textState.level {
+	case textLevelDrillConversations, textLevelConversations:
 		return m.loadTextConversations()
+	case textLevelTimeline:
+		return m.loadTextMessages()
+	default:
+		return m.loadTextAggregate()
 	}
-	return m.loadTextAggregate()
 }
