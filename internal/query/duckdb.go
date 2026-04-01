@@ -567,9 +567,10 @@ func (e *DuckDBEngine) buildStatsSearchConditions(searchQuery string, groupBy Vi
 			)`)
 			args = append(args, termPattern)
 		default:
-			// Default: search subject and sender
+			// Default: search subject, snippet, and sender
 			conditions = append(conditions, `(
 				msg.subject ILIKE ? ESCAPE '\' OR
+				COALESCE(msg.snippet, '') ILIKE ? ESCAPE '\' OR
 				EXISTS (
 					SELECT 1 FROM mr mr_search
 					JOIN p p_search ON p_search.id = mr_search.participant_id
@@ -578,7 +579,7 @@ func (e *DuckDBEngine) buildStatsSearchConditions(searchQuery string, groupBy Vi
 					  AND (p_search.email_address ILIKE ? ESCAPE '\' OR p_search.display_name ILIKE ? ESCAPE '\')
 				)
 			)`)
-			args = append(args, termPattern, termPattern, termPattern)
+			args = append(args, termPattern, termPattern, termPattern, termPattern)
 		}
 	}
 
@@ -599,9 +600,10 @@ func (e *DuckDBEngine) buildStatsSearchConditions(searchQuery string, groupBy Vi
 }
 
 // countArgsForTextTerms returns the number of args used by N text terms in
-// buildAggregateSearchConditions with no keyColumns (3 args per term: subject + 2 sender).
+// buildAggregateSearchConditions with no keyColumns (4 args per term:
+// subject + snippet + 2 sender).
 func countArgsForTextTerms(n int) int {
-	return n * 3
+	return n * 4
 }
 
 // keyColumns are passed through to buildAggregateSearchConditions to control

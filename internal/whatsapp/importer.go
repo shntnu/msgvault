@@ -390,6 +390,12 @@ func (imp *Importer) Import(ctx context.Context, waDBPath string, opts ImportOpt
 							summary.Errors++
 							imp.progress.OnError(fmt.Errorf("upsert attachment for message %s: %w", waMsg.KeyID, err))
 						}
+					} else {
+						// No media stored — clear attachment flags set by mapMessage
+						// so Parquet/TUI queries don't show phantom attachments.
+						_, _ = imp.store.DB().Exec(
+							"UPDATE messages SET has_attachments = 0, attachment_count = 0 WHERE id = ?",
+							messageID)
 					}
 
 					// Store media metadata in the attachments table is done above.

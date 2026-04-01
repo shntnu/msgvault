@@ -30,7 +30,10 @@ func (e *DuckDBEngine) buildTextFilterConditions(
 	if filter.ContactPhone != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM p p_filter
-			WHERE p_filter.id = msg.sender_id
+			WHERE p_filter.id = COALESCE(msg.sender_id,
+				(SELECT mr_fb.participant_id FROM mr mr_fb
+				 WHERE mr_fb.message_id = msg.id AND mr_fb.recipient_type = 'from'
+				 LIMIT 1))
 			  AND COALESCE(
 				NULLIF(p_filter.phone_number, ''),
 				p_filter.email_address
@@ -41,7 +44,10 @@ func (e *DuckDBEngine) buildTextFilterConditions(
 	if filter.ContactName != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM p p_filter
-			WHERE p_filter.id = msg.sender_id
+			WHERE p_filter.id = COALESCE(msg.sender_id,
+				(SELECT mr_fb.participant_id FROM mr mr_fb
+				 WHERE mr_fb.message_id = msg.id AND mr_fb.recipient_type = 'from'
+				 LIMIT 1))
 			  AND COALESCE(
 				NULLIF(TRIM(p_filter.display_name), ''),
 				NULLIF(p_filter.phone_number, ''),
@@ -188,18 +194,26 @@ func textAggViewDef(
 	case TextViewContacts:
 		keyExpr := "COALESCE(NULLIF(p_sender.phone_number, ''), " +
 			"p_sender.email_address)"
+		senderJoin := `JOIN p p_sender ON p_sender.id = COALESCE(msg.sender_id,
+			(SELECT mr_fb.participant_id FROM mr mr_fb
+			 WHERE mr_fb.message_id = msg.id AND mr_fb.recipient_type = 'from'
+			 LIMIT 1))`
 		return aggViewDef{
 			keyExpr:    keyExpr,
-			joinClause: "JOIN p p_sender ON p_sender.id = msg.sender_id",
-			nullGuard:  keyExpr + " IS NOT NULL AND msg.sender_id IS NOT NULL",
+			joinClause: senderJoin,
+			nullGuard:  keyExpr + " IS NOT NULL",
 		}, nil
 	case TextViewContactNames:
 		nameExpr := "COALESCE(NULLIF(TRIM(p_sender.display_name), ''), " +
 			"NULLIF(p_sender.phone_number, ''), p_sender.email_address)"
+		senderJoin := `JOIN p p_sender ON p_sender.id = COALESCE(msg.sender_id,
+			(SELECT mr_fb.participant_id FROM mr mr_fb
+			 WHERE mr_fb.message_id = msg.id AND mr_fb.recipient_type = 'from'
+			 LIMIT 1))`
 		return aggViewDef{
 			keyExpr:    nameExpr,
-			joinClause: "JOIN p p_sender ON p_sender.id = msg.sender_id",
-			nullGuard:  nameExpr + " IS NOT NULL AND msg.sender_id IS NOT NULL",
+			joinClause: senderJoin,
+			nullGuard:  nameExpr + " IS NOT NULL",
 		}, nil
 	case TextViewSources:
 		return aggViewDef{

@@ -64,7 +64,10 @@ func buildSQLiteTextFilterConditions(filter TextFilter) (string, []interface{}) 
 	if filter.ContactPhone != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM participants p_cp
-			WHERE p_cp.id = m.sender_id
+			WHERE p_cp.id = COALESCE(m.sender_id,
+				(SELECT mr_fb.participant_id FROM message_recipients mr_fb
+				 WHERE mr_fb.message_id = m.id AND mr_fb.recipient_type = 'from'
+				 LIMIT 1))
 			  AND COALESCE(
 				NULLIF(p_cp.phone_number, ''),
 				p_cp.email_address
@@ -75,7 +78,10 @@ func buildSQLiteTextFilterConditions(filter TextFilter) (string, []interface{}) 
 	if filter.ContactName != "" {
 		conditions = append(conditions, `EXISTS (
 			SELECT 1 FROM participants p_cn
-			WHERE p_cn.id = m.sender_id
+			WHERE p_cn.id = COALESCE(m.sender_id,
+				(SELECT mr_fb.participant_id FROM message_recipients mr_fb
+				 WHERE mr_fb.message_id = m.id AND mr_fb.recipient_type = 'from'
+				 LIMIT 1))
 			  AND COALESCE(
 				NULLIF(TRIM(p_cn.display_name), ''),
 				NULLIF(p_cn.phone_number, ''),
@@ -232,18 +238,26 @@ func textAggSQLiteDimension(
 	switch view {
 	case TextViewContacts:
 		keyExpr := "COALESCE(NULLIF(p_agg.phone_number, ''), p_agg.email_address)"
+		senderJoin := `JOIN participants p_agg ON p_agg.id = COALESCE(m.sender_id,
+			(SELECT mr_fb.participant_id FROM message_recipients mr_fb
+			 WHERE mr_fb.message_id = m.id AND mr_fb.recipient_type = 'from'
+			 LIMIT 1))`
 		return aggDimension{
 			keyExpr:   keyExpr,
-			joins:     "JOIN participants p_agg ON p_agg.id = m.sender_id",
-			whereExpr: keyExpr + " IS NOT NULL AND m.sender_id IS NOT NULL",
+			joins:     senderJoin,
+			whereExpr: keyExpr + " IS NOT NULL",
 		}, nil
 	case TextViewContactNames:
 		nameExpr := "COALESCE(NULLIF(TRIM(p_agg.display_name), ''), " +
 			"NULLIF(p_agg.phone_number, ''), p_agg.email_address)"
+		senderJoin := `JOIN participants p_agg ON p_agg.id = COALESCE(m.sender_id,
+			(SELECT mr_fb.participant_id FROM message_recipients mr_fb
+			 WHERE mr_fb.message_id = m.id AND mr_fb.recipient_type = 'from'
+			 LIMIT 1))`
 		return aggDimension{
 			keyExpr:   nameExpr,
-			joins:     "JOIN participants p_agg ON p_agg.id = m.sender_id",
-			whereExpr: nameExpr + " IS NOT NULL AND m.sender_id IS NOT NULL",
+			joins:     senderJoin,
+			whereExpr: nameExpr + " IS NOT NULL",
 		}, nil
 	case TextViewSources:
 		return aggDimension{

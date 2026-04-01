@@ -268,6 +268,7 @@ func (s *Store) InitSchema() error {
 		{`ALTER TABLE messages ADD COLUMN deleted_from_source_at DATETIME`, "deleted_from_source_at"},
 		{`ALTER TABLE messages ADD COLUMN delete_batch_id TEXT`, "delete_batch_id"},
 		{`ALTER TABLE conversations ADD COLUMN title TEXT`, "title"},
+		{`ALTER TABLE conversations ADD COLUMN conversation_type TEXT NOT NULL DEFAULT 'email_thread'`, "conversation_type"},
 	} {
 		if _, err := s.db.Exec(m.sql); err != nil {
 			if !isSQLiteError(err, "duplicate column name") {
