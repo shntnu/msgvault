@@ -214,15 +214,31 @@ func TestIntegration(t *testing.T) {
 	for _, row := range convRows {
 		convByID[row.ConversationID] = row
 	}
+	wantConv1LastAt := baseTime.Add(2 * time.Minute)
+	wantConv2LastAt := baseTime.Add(time.Hour + time.Minute)
 	if row, ok := convByID[conv1ID]; !ok {
 		t.Errorf("conv1 not found in ListConversations results")
-	} else if row.MessageCount != 3 {
-		t.Errorf("conv1 MessageCount: got %d, want 3", row.MessageCount)
+	} else {
+		if row.MessageCount != 3 {
+			t.Errorf("conv1 MessageCount: got %d, want 3", row.MessageCount)
+		}
+		if row.LastMessageAt.IsZero() {
+			t.Error("conv1 LastMessageAt is zero")
+		} else if !row.LastMessageAt.Equal(wantConv1LastAt) {
+			t.Errorf("conv1 LastMessageAt: got %v, want %v", row.LastMessageAt, wantConv1LastAt)
+		}
 	}
 	if row, ok := convByID[conv2ID]; !ok {
 		t.Errorf("conv2 not found in ListConversations results")
-	} else if row.MessageCount != 2 {
-		t.Errorf("conv2 MessageCount: got %d, want 2", row.MessageCount)
+	} else {
+		if row.MessageCount != 2 {
+			t.Errorf("conv2 MessageCount: got %d, want 2", row.MessageCount)
+		}
+		if row.LastMessageAt.IsZero() {
+			t.Error("conv2 LastMessageAt is zero")
+		} else if !row.LastMessageAt.Equal(wantConv2LastAt) {
+			t.Errorf("conv2 LastMessageAt: got %v, want %v", row.LastMessageAt, wantConv2LastAt)
+		}
 	}
 
 	// TextAggregate by contacts — groups by phone number.

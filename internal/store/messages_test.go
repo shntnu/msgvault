@@ -59,6 +59,21 @@ func TestRecomputeConversationStats(t *testing.T) {
 		t.Fatalf("UpsertMessage msg2: %v", err)
 	}
 
+	// msg3 has the SAME sent_at as msg2 but a different snippet.
+	// After recompute, last_message_preview must come from msg3 (higher id),
+	// exercising the `id DESC` tie-breaker in the SQL.
+	msg3 := &store.Message{
+		SourceID:        source.ID,
+		SourceMessageID: "msg-3",
+		ConversationID:  convID,
+		MessageType:     "whatsapp",
+		SentAt:          sql.NullTime{Time: sentAt2, Valid: true},
+		Snippet:         sql.NullString{String: "tie-breaker", Valid: true},
+	}
+	if _, err := st.UpsertMessage(msg3); err != nil {
+		t.Fatalf("UpsertMessage msg3: %v", err)
+	}
+
 	// Add a conversation participant so participant_count is non-zero.
 	participantID, err := st.EnsureParticipantByPhone("+15559876543", "Bob", "whatsapp")
 	if err != nil {
@@ -83,8 +98,8 @@ func TestRecomputeConversationStats(t *testing.T) {
 	).Scan(&count, &participantCount, &lastMsgAt, &preview); err != nil {
 		t.Fatalf("post-recompute scan: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("message_count = %d, want 2", count)
+	if count != 3 {
+		t.Errorf("message_count = %d, want 3", count)
 	}
 	if participantCount != 1 {
 		t.Errorf("participant_count = %d, want 1", participantCount)
@@ -92,9 +107,10 @@ func TestRecomputeConversationStats(t *testing.T) {
 	if !lastMsgAt.Valid {
 		t.Error("last_message_at is NULL, want a timestamp")
 	}
-	// msg2 has the later sent_at, so its snippet ("world") should be the preview.
-	if !preview.Valid || preview.String != "world" {
-		t.Errorf("last_message_preview = %q, want %q", preview.String, "world")
+	// msg2 and msg3 share the same sent_at; msg3 has the higher id, so its
+	// snippet ("tie-breaker") must win via the `id DESC` tie-breaker.
+	if !preview.Valid || preview.String != "tie-breaker" {
+		t.Errorf("last_message_preview = %q, want %q", preview.String, "tie-breaker")
 	}
 
 	// Idempotency: calling again should produce the same result.
@@ -106,8 +122,8 @@ func TestRecomputeConversationStats(t *testing.T) {
 	).Scan(&count); err != nil {
 		t.Fatalf("idempotency scan: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("idempotency: message_count = %d, want 2", count)
+	if count != 3 {
+		t.Errorf("idempotency: message_count = %d, want 3", count)
 	}
 }
 
