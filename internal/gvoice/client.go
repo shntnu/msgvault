@@ -2,22 +2,23 @@ package gvoice
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/wesm/msgvault/internal/gmail"
+	"github.com/wesm/msgvault/internal/store"
+	"github.com/wesm/msgvault/internal/textimport"
 )
 
 const defaultPageSize = 500
 
-// Client reads from a Google Voice Takeout export and implements the gmail.API
-// interface so it can be used with the existing sync infrastructure.
+// Client reads from a Google Voice Takeout export and imports messages
+// into the msgvault store.
 type Client struct {
 	takeoutDir string
 	owner      ownerPhones
@@ -25,14 +26,13 @@ type Client struct {
 	afterDate  time.Time
 	beforeDate time.Time
 	limit      int
-	returned   int
 	index      []indexEntry
 	indexBuilt bool
 	logger     *slog.Logger
 	pageSize   int
 
-	// LRU cache for parsed HTML files (avoid re-parsing when consecutive
-	// messages come from the same file)
+	// LRU cache for parsed HTML files (avoid re-parsing when
+	// consecutive messages come from the same file)
 	lastFilePath string
 	lastMessages []textMessage
 	lastGroupPar []string
@@ -51,7 +51,7 @@ func WithBeforeDate(t time.Time) ClientOption {
 	return func(c *Client) { c.beforeDate = t }
 }
 
-// WithLimit sets the maximum number of messages to return across all pages.
+// WithLimit sets the maximum number of messages to import.
 func WithLimit(n int) ClientOption {
 	return func(c *Client) { c.limit = n }
 }
@@ -62,9 +62,11 @@ func WithLogger(l *slog.Logger) ClientOption {
 }
 
 // NewClient creates a Client from a Google Voice Takeout directory.
-// The directory should be the "Voice" folder containing "Calls/" and "Phones.vcf".
-func NewClient(takeoutDir string, opts ...ClientOption) (*Client, error) {
-	// Validate directory exists
+// The directory should be the "Voice" folder containing "Calls/"
+// and "Phones.vcf".
+func NewClient(
+	takeoutDir string, opts ...ClientOption,
+) (*Client, error) {
 	info, err := os.Stat(takeoutDir)
 	if err != nil {
 		return nil, fmt.Errorf("takeout directory: %w", err)
@@ -73,13 +75,14 @@ func NewClient(takeoutDir string, opts ...ClientOption) (*Client, error) {
 		return nil, fmt.Errorf("not a directory: %s", takeoutDir)
 	}
 
-	// Check for Calls subdirectory
 	callsDir := filepath.Join(takeoutDir, "Calls")
 	if _, err := os.Stat(callsDir); err != nil {
-		return nil, fmt.Errorf("calls directory not found in %s: %w", takeoutDir, err)
+		return nil, fmt.Errorf(
+			"calls directory not found in %s: %w",
+			takeoutDir, err,
+		)
 	}
 
-	// Parse Phones.vcf
 	vcfPath := filepath.Join(takeoutDir, "Phones.vcf")
 	vcfData, err := os.ReadFile(vcfPath)
 	if err != nil {
@@ -106,7 +109,7 @@ func NewClient(takeoutDir string, opts ...ClientOption) (*Client, error) {
 	return c, nil
 }
 
-// Identifier returns the Google Voice phone number used as source identifier.
+// Identifier returns the Google Voice phone number.
 func (c *Client) Identifier() string {
 	return c.identifier
 }
@@ -116,9 +119,423 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// buildIndex walks the Calls directory, parses each HTML file, and builds
-// a sorted index of all messages and call records. This is done lazily
-// on the first call to ListMessages.
+// Import reads all matching messages from the Takeout export and
+// writes them into the msgvault store.
+func (c *Client) Import(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+) (*ImportSummary, error) {
+	if err := c.buildIndex(); err != nil {
+		return nil, fmt.Errorf("build index: %w", err)
+	}
+
+	summary := &ImportSummary{}
+
+	// Ensure labels
+	labelIDs, err := c.ensureLabels(s, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Caches
+	phoneCache := map[string]int64{} // phone → participantID
+	convCache := map[string]int64{}  // threadID → conversationID
+	imported := 0
+
+	for _, entry := range c.index {
+		if err := ctx.Err(); err != nil {
+			return summary, err
+		}
+		if c.limit > 0 && imported >= c.limit {
+			break
+		}
+
+		switch entry.FileType {
+		case fileTypeText, fileTypeGroup:
+			n, err := c.importTextEntry(
+				ctx, s, sourceID, &entry,
+				labelIDs, phoneCache, convCache, summary,
+			)
+			if err != nil {
+				c.logger.Warn(
+					"failed to import text entry",
+					"id", entry.ID,
+					"error", err,
+				)
+				summary.Skipped++
+				continue
+			}
+			imported += n
+
+		default:
+			if err := c.importCallEntry(
+				ctx, s, sourceID, &entry,
+				labelIDs, phoneCache, convCache, summary,
+			); err != nil {
+				c.logger.Warn(
+					"failed to import call entry",
+					"id", entry.ID,
+					"error", err,
+				)
+				summary.Skipped++
+				continue
+			}
+			imported++
+		}
+	}
+
+	if err := s.RecomputeConversationStats(sourceID); err != nil {
+		return summary, fmt.Errorf("recompute stats: %w", err)
+	}
+
+	return summary, nil
+}
+
+func (c *Client) ensureLabels(
+	s *store.Store, sourceID int64,
+) (map[string]int64, error) {
+	labels := map[string]int64{}
+	for _, name := range []string{
+		"sms", "mms", "call_received",
+		"call_placed", "call_missed", "voicemail",
+	} {
+		id, err := s.EnsureLabel(sourceID, name, name, "user")
+		if err != nil {
+			return nil, fmt.Errorf("ensure label %q: %w", name, err)
+		}
+		labels[name] = id
+	}
+	return labels, nil
+}
+
+func (c *Client) importTextEntry(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+	entry *indexEntry,
+	labelIDs map[string]int64,
+	phoneCache map[string]int64,
+	convCache map[string]int64,
+	summary *ImportSummary,
+) (int, error) {
+	messages, groupParticipants, err := c.getCachedMessages(
+		entry.FilePath,
+	)
+	if err != nil {
+		return 0, err
+	}
+
+	if entry.MessageIndex >= len(messages) {
+		return 0, fmt.Errorf(
+			"message index %d out of range (file has %d messages)",
+			entry.MessageIndex, len(messages),
+		)
+	}
+
+	msg := messages[entry.MessageIndex]
+
+	// Resolve conversation
+	convType := "direct_chat"
+	title := ""
+	if entry.FileType == fileTypeGroup {
+		convType = "group_chat"
+		title = "Group"
+	}
+
+	convID, err := c.ensureConv(
+		s, sourceID, entry.ThreadID, convType, title,
+		convCache, summary,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("ensure conversation: %w", err)
+	}
+
+	// Resolve sender
+	senderID, err := c.resolveParticipant(
+		s, msg.SenderPhone, msg.SenderName,
+		phoneCache, summary,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("resolve sender: %w", err)
+	}
+
+	// Ensure conversation participant
+	if senderID > 0 {
+		_ = s.EnsureConversationParticipant(convID, senderID, "member")
+	}
+
+	// Ensure owner as participant
+	ownerID, err := c.resolveParticipant(
+		s, c.owner.GoogleVoice, "",
+		phoneCache, summary,
+	)
+	if err == nil && ownerID > 0 {
+		_ = s.EnsureConversationParticipant(convID, ownerID, "member")
+	}
+
+	// Ensure group participants
+	for _, phone := range groupParticipants {
+		pid, pErr := c.resolveParticipant(
+			s, phone, "", phoneCache, summary,
+		)
+		if pErr == nil && pid > 0 {
+			_ = s.EnsureConversationParticipant(
+				convID, pid, "member",
+			)
+		}
+	}
+
+	// Build message
+	msgType := MessageTypeForFileType(entry.FileType)
+	isFromMe := msg.IsMe
+
+	senderIDNull := sql.NullInt64{}
+	if senderID > 0 {
+		senderIDNull = sql.NullInt64{Int64: senderID, Valid: true}
+	}
+
+	sentAt := sql.NullTime{}
+	if !msg.Timestamp.IsZero() {
+		sentAt = sql.NullTime{Time: msg.Timestamp, Valid: true}
+	}
+
+	hasAttachments := len(msg.Attachments) > 0
+
+	msgID, err := s.UpsertMessage(&store.Message{
+		SourceID:        sourceID,
+		SourceMessageID: entry.ID,
+		ConversationID:  convID,
+		Snippet:         nullStr(snippet(msg.Body, 100)),
+		SentAt:          sentAt,
+		MessageType:     msgType,
+		SenderID:        senderIDNull,
+		IsFromMe:        isFromMe,
+		HasAttachments:  hasAttachments,
+		SizeEstimate:    int64(len(msg.Body)),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("upsert message: %w", err)
+	}
+
+	// Store body
+	if err := s.UpsertMessageBody(
+		msgID,
+		sql.NullString{String: msg.Body, Valid: msg.Body != ""},
+		sql.NullString{},
+	); err != nil {
+		return 0, fmt.Errorf("upsert message body: %w", err)
+	}
+
+	// Link labels
+	for _, labelName := range entry.Labels {
+		if lid, ok := labelIDs[labelName]; ok {
+			_ = s.LinkMessageLabel(msgID, lid)
+		}
+	}
+	// Add mms label if has attachments
+	if hasAttachments {
+		if lid, ok := labelIDs["mms"]; ok {
+			_ = s.LinkMessageLabel(msgID, lid)
+		}
+	}
+
+	summary.MessagesImported++
+	return 1, nil
+}
+
+func (c *Client) importCallEntry(
+	ctx context.Context,
+	s *store.Store,
+	sourceID int64,
+	entry *indexEntry,
+	labelIDs map[string]int64,
+	phoneCache map[string]int64,
+	convCache map[string]int64,
+	summary *ImportSummary,
+) error {
+	f, err := os.Open(entry.FilePath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	record, err := parseCallHTML(f)
+	if err != nil {
+		return err
+	}
+
+	// Resolve conversation
+	convID, err := c.ensureConv(
+		s, sourceID, entry.ThreadID, "direct_chat", "",
+		convCache, summary,
+	)
+	if err != nil {
+		return fmt.Errorf("ensure conversation: %w", err)
+	}
+
+	// Resolve contact
+	contactID, err := c.resolveParticipant(
+		s, record.Phone, record.Name,
+		phoneCache, summary,
+	)
+	if err != nil {
+		return fmt.Errorf("resolve contact: %w", err)
+	}
+	if contactID > 0 {
+		_ = s.EnsureConversationParticipant(
+			convID, contactID, "member",
+		)
+	}
+
+	// Ensure owner as participant
+	ownerID, err := c.resolveParticipant(
+		s, c.owner.GoogleVoice, "",
+		phoneCache, summary,
+	)
+	if err == nil && ownerID > 0 {
+		_ = s.EnsureConversationParticipant(
+			convID, ownerID, "member",
+		)
+	}
+
+	// Determine sender
+	var senderID int64
+	isFromMe := false
+	switch record.CallType {
+	case fileTypePlaced:
+		senderID = ownerID
+		isFromMe = true
+	default:
+		senderID = contactID
+	}
+
+	// Build body
+	var body strings.Builder
+	switch record.CallType {
+	case fileTypeReceived:
+		fmt.Fprintf(&body, "Received call from %s", record.Name)
+	case fileTypePlaced:
+		fmt.Fprintf(&body, "Placed call to %s", record.Name)
+	case fileTypeMissed:
+		fmt.Fprintf(&body, "Missed call from %s", record.Name)
+	case fileTypeVoicemail:
+		fmt.Fprintf(&body, "Voicemail from %s", record.Name)
+	}
+	if record.Duration != "" {
+		fmt.Fprintf(&body, " (%s)", formatDuration(record.Duration))
+	}
+
+	msgType := MessageTypeForFileType(entry.FileType)
+
+	senderIDNull := sql.NullInt64{}
+	if senderID > 0 {
+		senderIDNull = sql.NullInt64{
+			Int64: senderID, Valid: true,
+		}
+	}
+
+	sentAt := sql.NullTime{}
+	if !record.Timestamp.IsZero() {
+		sentAt = sql.NullTime{
+			Time: record.Timestamp, Valid: true,
+		}
+	}
+
+	bodyStr := body.String()
+	msgID, err := s.UpsertMessage(&store.Message{
+		SourceID:        sourceID,
+		SourceMessageID: entry.ID,
+		ConversationID:  convID,
+		Snippet:         nullStr(snippet(bodyStr, 100)),
+		SentAt:          sentAt,
+		MessageType:     msgType,
+		SenderID:        senderIDNull,
+		IsFromMe:        isFromMe,
+		SizeEstimate:    int64(len(bodyStr)),
+	})
+	if err != nil {
+		return fmt.Errorf("upsert message: %w", err)
+	}
+
+	// Store body
+	if err := s.UpsertMessageBody(
+		msgID,
+		sql.NullString{String: bodyStr, Valid: bodyStr != ""},
+		sql.NullString{},
+	); err != nil {
+		return fmt.Errorf("upsert message body: %w", err)
+	}
+
+	// Store raw HTML
+	rawData, rErr := os.ReadFile(entry.FilePath)
+	if rErr == nil {
+		_ = s.UpsertMessageRawWithFormat(
+			msgID, rawData, "gvoice_html",
+		)
+	}
+
+	// Link labels
+	for _, labelName := range entry.Labels {
+		if lid, ok := labelIDs[labelName]; ok {
+			_ = s.LinkMessageLabel(msgID, lid)
+		}
+	}
+
+	summary.MessagesImported++
+	return nil
+}
+
+func (c *Client) ensureConv(
+	s *store.Store,
+	sourceID int64,
+	threadID, convType, title string,
+	cache map[string]int64,
+	summary *ImportSummary,
+) (int64, error) {
+	if id, ok := cache[threadID]; ok {
+		return id, nil
+	}
+	id, err := s.EnsureConversationWithType(
+		sourceID, threadID, convType, title,
+	)
+	if err != nil {
+		return 0, err
+	}
+	cache[threadID] = id
+	summary.ConversationsImported++
+	return id, nil
+}
+
+func (c *Client) resolveParticipant(
+	s *store.Store,
+	phone, displayName string,
+	cache map[string]int64,
+	summary *ImportSummary,
+) (int64, error) {
+	if phone == "" {
+		return 0, nil
+	}
+	normalized, err := textimport.NormalizePhone(phone)
+	if err != nil {
+		return 0, nil // skip non-normalizable
+	}
+	if id, ok := cache[normalized]; ok {
+		return id, nil
+	}
+	id, err := s.EnsureParticipantByPhone(
+		normalized, displayName, "google_voice",
+	)
+	if err != nil {
+		return 0, err
+	}
+	cache[normalized] = id
+	summary.ParticipantsResolved++
+	return id, nil
+}
+
+// buildIndex walks the Calls directory, parses each HTML file, and
+// builds a sorted index of all messages and call records.
 func (c *Client) buildIndex() error {
 	if c.indexBuilt {
 		return nil
@@ -150,20 +567,28 @@ func (c *Client) buildIndex() error {
 
 		switch ft {
 		case fileTypeText, fileTypeGroup:
-			entries, err := c.indexTextFile(filePath, name, ft)
+			ents, err := c.indexTextFile(filePath, name, ft)
 			if err != nil {
-				c.logger.Warn("failed to index text file", "file", entry.Name(), "error", err)
+				c.logger.Warn(
+					"failed to index text file",
+					"file", entry.Name(),
+					"error", err,
+				)
 				continue
 			}
-			index = append(index, entries...)
+			index = append(index, ents...)
 
-		case fileTypeReceived, fileTypePlaced, fileTypeMissed, fileTypeVoicemail:
-			entry, err := c.indexCallFile(filePath, name, ft)
+		default:
+			ent, err := c.indexCallFile(filePath, name, ft)
 			if err != nil {
-				c.logger.Warn("failed to index call file", "file", entry.ID, "error", err)
+				c.logger.Warn(
+					"failed to index call file",
+					"file", entry.Name(),
+					"error", err,
+				)
 				continue
 			}
-			index = append(index, *entry)
+			index = append(index, *ent)
 		}
 	}
 
@@ -173,13 +598,13 @@ func (c *Client) buildIndex() error {
 		if !c.afterDate.IsZero() && e.Timestamp.Before(c.afterDate) {
 			continue
 		}
-		if !c.beforeDate.IsZero() && !e.Timestamp.Before(c.beforeDate) {
+		if !c.beforeDate.IsZero() &&
+			!e.Timestamp.Before(c.beforeDate) {
 			continue
 		}
 		filtered = append(filtered, e)
 	}
 
-	// Sort by timestamp
 	sort.Slice(filtered, func(i, j int) bool {
 		return filtered[i].Timestamp.Before(filtered[j].Timestamp)
 	})
@@ -196,9 +621,9 @@ func (c *Client) buildIndex() error {
 	return nil
 }
 
-// indexTextFile parses a text/group conversation HTML and returns index entries
-// for each individual message within it.
-func (c *Client) indexTextFile(filePath, contactName string, ft fileType) ([]indexEntry, error) {
+func (c *Client) indexTextFile(
+	filePath, contactName string, ft fileType,
+) ([]indexEntry, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -210,24 +635,27 @@ func (c *Client) indexTextFile(filePath, contactName string, ft fileType) ([]ind
 		return nil, err
 	}
 
-	var entries []indexEntry
+	var result []indexEntry
 	for i, msg := range messages {
-		// Compute deterministic message ID
 		bodyPrefix := msg.Body
 		if len(bodyPrefix) > 50 {
 			bodyPrefix = bodyPrefix[:50]
 		}
-		id := computeMessageID(msg.SenderPhone, msg.Timestamp.Format(time.RFC3339Nano), bodyPrefix)
+		id := computeMessageID(
+			msg.SenderPhone,
+			msg.Timestamp.Format(time.RFC3339Nano),
+			bodyPrefix,
+		)
 
-		// Compute thread ID
 		var threadID string
 		if ft == fileTypeGroup {
-			threadID = computeThreadID(c.owner.Cell, fileTypeGroup, "", groupParticipants)
+			threadID = computeThreadID(
+				c.owner.Cell, fileTypeGroup,
+				"", groupParticipants,
+			)
 		} else {
-			// For 1:1 texts, use the non-owner phone
 			otherPhone := msg.SenderPhone
 			if msg.IsMe {
-				// Need to find the other party — look through all messages
 				for _, m := range messages {
 					if !m.IsMe {
 						otherPhone = m.SenderPhone
@@ -235,12 +663,14 @@ func (c *Client) indexTextFile(filePath, contactName string, ft fileType) ([]ind
 					}
 				}
 			}
-			threadID = computeThreadID(c.owner.Cell, fileTypeText, otherPhone, nil)
+			threadID = computeThreadID(
+				c.owner.Cell, fileTypeText,
+				otherPhone, nil,
+			)
 		}
 
 		label := labelForFileType(ft)
-
-		entries = append(entries, indexEntry{
+		result = append(result, indexEntry{
 			ID:           id,
 			ThreadID:     threadID,
 			FilePath:     filePath,
@@ -251,11 +681,12 @@ func (c *Client) indexTextFile(filePath, contactName string, ft fileType) ([]ind
 		})
 	}
 
-	return entries, nil
+	return result, nil
 }
 
-// indexCallFile parses a call log HTML and returns a single index entry.
-func (c *Client) indexCallFile(filePath, contactName string, ft fileType) (*indexEntry, error) {
+func (c *Client) indexCallFile(
+	filePath, contactName string, ft fileType,
+) (*indexEntry, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -267,13 +698,17 @@ func (c *Client) indexCallFile(filePath, contactName string, ft fileType) (*inde
 		return nil, err
 	}
 
-	// Override file type from HTML if the filename didn't include it
 	if record.CallType != 0 {
 		ft = record.CallType
 	}
 
-	id := computeMessageID(ft.String(), record.Phone, record.Timestamp.Format(time.RFC3339Nano))
-	threadID := computeThreadID(c.owner.Cell, ft, record.Phone, nil)
+	id := computeMessageID(
+		ft.String(), record.Phone,
+		record.Timestamp.Format(time.RFC3339Nano),
+	)
+	threadID := computeThreadID(
+		c.owner.Cell, ft, record.Phone, nil,
+	)
 	label := labelForFileType(ft)
 
 	return &indexEntry{
@@ -286,261 +721,11 @@ func (c *Client) indexCallFile(filePath, contactName string, ft fileType) (*inde
 	}, nil
 }
 
-// GetProfile returns a profile with the GV phone as identifier and index size as total.
-func (c *Client) GetProfile(ctx context.Context) (*gmail.Profile, error) {
-	if err := c.buildIndex(); err != nil {
-		return nil, err
-	}
-
-	return &gmail.Profile{
-		EmailAddress:  c.identifier,
-		MessagesTotal: int64(len(c.index)),
-		HistoryID:     uint64(len(c.index)),
-	}, nil
-}
-
-// ListLabels returns the set of labels used for Google Voice messages.
-func (c *Client) ListLabels(ctx context.Context) ([]*gmail.Label, error) {
-	return []*gmail.Label{
-		{ID: "sms", Name: "SMS", Type: "user"},
-		{ID: "call_received", Name: "Call Received", Type: "user"},
-		{ID: "call_placed", Name: "Call Placed", Type: "user"},
-		{ID: "call_missed", Name: "Call Missed", Type: "user"},
-		{ID: "voicemail", Name: "Voicemail", Type: "user"},
-		{ID: "mms", Name: "MMS", Type: "user"},
-	}, nil
-}
-
-// ListMessages returns a page of message IDs from the sorted index.
-// The pageToken is the string representation of the offset into the index.
-func (c *Client) ListMessages(ctx context.Context, query string, pageToken string) (*gmail.MessageListResponse, error) {
-	if err := c.buildIndex(); err != nil {
-		return nil, fmt.Errorf("build index: %w", err)
-	}
-
-	// Check limit
-	if c.limit > 0 && c.returned >= c.limit {
-		return &gmail.MessageListResponse{}, nil
-	}
-
-	offset := 0
-	if pageToken != "" {
-		var err error
-		offset, err = strconv.Atoi(pageToken)
-		if err != nil {
-			return nil, fmt.Errorf("invalid page token: %w", err)
-		}
-	}
-
-	if offset >= len(c.index) {
-		return &gmail.MessageListResponse{}, nil
-	}
-
-	// Calculate page size respecting limit
-	pageSize := c.pageSize
-	if c.limit > 0 {
-		remaining := c.limit - c.returned
-		if remaining < pageSize {
-			pageSize = remaining
-		}
-	}
-
-	end := offset + pageSize
-	if end > len(c.index) {
-		end = len(c.index)
-	}
-
-	page := c.index[offset:end]
-	messages := make([]gmail.MessageID, len(page))
-	for i, entry := range page {
-		messages[i] = gmail.MessageID{
-			ID:       entry.ID,
-			ThreadID: entry.ThreadID,
-		}
-	}
-
-	c.returned += len(messages)
-
-	var nextPageToken string
-	if end < len(c.index) && (c.limit <= 0 || c.returned < c.limit) {
-		nextPageToken = strconv.Itoa(end)
-	}
-
-	totalEstimate := int64(len(c.index))
-
-	return &gmail.MessageListResponse{
-		Messages:           messages,
-		NextPageToken:      nextPageToken,
-		ResultSizeEstimate: totalEstimate,
-	}, nil
-}
-
-// GetMessageRaw fetches a single message by ID and builds synthetic MIME data.
-func (c *Client) GetMessageRaw(ctx context.Context, messageID string) (*gmail.RawMessage, error) {
-	if err := c.buildIndex(); err != nil {
-		return nil, fmt.Errorf("build index: %w", err)
-	}
-
-	// Linear scan for the entry (index is typically <300k entries)
-	var entry *indexEntry
-	for i := range c.index {
-		if c.index[i].ID == messageID {
-			entry = &c.index[i]
-			break
-		}
-	}
-	if entry == nil {
-		return nil, &gmail.NotFoundError{Path: "/messages/" + messageID}
-	}
-
-	switch entry.FileType {
-	case fileTypeText, fileTypeGroup:
-		return c.buildTextMessage(entry)
-	case fileTypeReceived, fileTypePlaced, fileTypeMissed, fileTypeVoicemail:
-		return c.buildCallMessage(entry)
-	default:
-		return nil, fmt.Errorf("unknown file type for message %s", messageID)
-	}
-}
-
-// buildTextMessage constructs a RawMessage from a text/group conversation entry.
-func (c *Client) buildTextMessage(entry *indexEntry) (*gmail.RawMessage, error) {
-	messages, groupParticipants, err := c.getCachedMessages(entry.FilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	if entry.MessageIndex >= len(messages) {
-		return nil, fmt.Errorf("message index %d out of range (file has %d messages)", entry.MessageIndex, len(messages))
-	}
-
-	msg := messages[entry.MessageIndex]
-
-	// Determine from and to addresses
-	var fromAddrs, toAddrs []string
-
-	ownerEmail, _ := normalizeIdentifier(c.owner.GoogleVoice)
-
-	if msg.IsMe {
-		fromAddrs = []string{ownerEmail}
-		if entry.FileType == fileTypeGroup {
-			for _, phone := range groupParticipants {
-				email, _ := normalizeIdentifier(phone)
-				toAddrs = append(toAddrs, email)
-			}
-		} else {
-			// 1:1 text — find the other party
-			for _, m := range messages {
-				if !m.IsMe {
-					email, _ := normalizeIdentifier(m.SenderPhone)
-					toAddrs = []string{email}
-					break
-				}
-			}
-		}
-	} else {
-		senderEmail, _ := normalizeIdentifier(msg.SenderPhone)
-		fromAddrs = []string{senderEmail}
-		toAddrs = []string{ownerEmail}
-		// In group conversations, add other participants
-		if entry.FileType == fileTypeGroup {
-			for _, phone := range groupParticipants {
-				email, _ := normalizeIdentifier(phone)
-				if email != senderEmail {
-					toAddrs = append(toAddrs, email)
-				}
-			}
-		}
-	}
-
-	mimeData := buildMIME(fromAddrs, toAddrs, msg.Timestamp, entry.ID, msg.Body)
-
-	internalDate := int64(0)
-	if !msg.Timestamp.IsZero() {
-		internalDate = msg.Timestamp.UnixMilli()
-	}
-
-	// Check for MMS attachments
-	labels := entry.Labels
-	if len(msg.Attachments) > 0 {
-		labels = append(labels, "mms")
-	}
-
-	return &gmail.RawMessage{
-		ID:           entry.ID,
-		ThreadID:     entry.ThreadID,
-		LabelIDs:     labels,
-		Snippet:      snippet(msg.Body, 100),
-		HistoryID:    uint64(entry.Timestamp.UnixNano()),
-		InternalDate: internalDate,
-		SizeEstimate: int64(len(mimeData)),
-		Raw:          mimeData,
-	}, nil
-}
-
-// buildCallMessage constructs a RawMessage from a call record entry.
-func (c *Client) buildCallMessage(entry *indexEntry) (*gmail.RawMessage, error) {
-	f, err := os.Open(entry.FilePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
-	record, err := parseCallHTML(f)
-	if err != nil {
-		return nil, err
-	}
-
-	// Build a descriptive body for the call
-	var body strings.Builder
-	switch record.CallType {
-	case fileTypeReceived:
-		fmt.Fprintf(&body, "Received call from %s", record.Name)
-	case fileTypePlaced:
-		fmt.Fprintf(&body, "Placed call to %s", record.Name)
-	case fileTypeMissed:
-		fmt.Fprintf(&body, "Missed call from %s", record.Name)
-	case fileTypeVoicemail:
-		fmt.Fprintf(&body, "Voicemail from %s", record.Name)
-	}
-	if record.Duration != "" {
-		fmt.Fprintf(&body, " (%s)", formatDuration(record.Duration))
-	}
-
-	ownerEmail, _ := normalizeIdentifier(c.owner.GoogleVoice)
-	contactEmail, _ := normalizeIdentifier(record.Phone)
-
-	var fromAddrs, toAddrs []string
-	switch record.CallType {
-	case fileTypeReceived, fileTypeMissed, fileTypeVoicemail:
-		fromAddrs = []string{contactEmail}
-		toAddrs = []string{ownerEmail}
-	case fileTypePlaced:
-		fromAddrs = []string{ownerEmail}
-		toAddrs = []string{contactEmail}
-	}
-
-	mimeData := buildMIME(fromAddrs, toAddrs, record.Timestamp, entry.ID, body.String())
-
-	internalDate := int64(0)
-	if !record.Timestamp.IsZero() {
-		internalDate = record.Timestamp.UnixMilli()
-	}
-
-	return &gmail.RawMessage{
-		ID:           entry.ID,
-		ThreadID:     entry.ThreadID,
-		LabelIDs:     entry.Labels,
-		Snippet:      snippet(body.String(), 100),
-		HistoryID:    uint64(record.Timestamp.UnixNano()),
-		InternalDate: internalDate,
-		SizeEstimate: int64(len(mimeData)),
-		Raw:          mimeData,
-	}, nil
-}
-
-// getCachedMessages returns parsed messages for a file, using a simple cache.
-func (c *Client) getCachedMessages(filePath string) ([]textMessage, []string, error) {
+// getCachedMessages returns parsed messages for a file, using a
+// simple LRU cache.
+func (c *Client) getCachedMessages(
+	filePath string,
+) ([]textMessage, []string, error) {
 	if c.lastFilePath == filePath {
 		return c.lastMessages, c.lastGroupPar, nil
 	}
@@ -563,45 +748,15 @@ func (c *Client) getCachedMessages(filePath string) ([]textMessage, []string, er
 	return messages, groupParticipants, nil
 }
 
-// GetMessagesRawBatch fetches multiple messages sequentially.
-func (c *Client) GetMessagesRawBatch(ctx context.Context, messageIDs []string) ([]*gmail.RawMessage, error) {
-	results := make([]*gmail.RawMessage, len(messageIDs))
-	for i, id := range messageIDs {
-		msg, err := c.GetMessageRaw(ctx, id)
-		if err != nil {
-			c.logger.Warn("failed to fetch message", "id", id, "error", err)
-			continue
-		}
-		results[i] = msg
+func nullStr(s string) sql.NullString {
+	if s == "" {
+		return sql.NullString{}
 	}
-	return results, nil
+	return sql.NullString{String: s, Valid: true}
 }
 
-// ListHistory is not supported for Google Voice Takeout (static export).
-func (c *Client) ListHistory(ctx context.Context, startHistoryID uint64, pageToken string) (*gmail.HistoryResponse, error) {
-	return &gmail.HistoryResponse{
-		HistoryID: startHistoryID,
-	}, nil
-}
-
-// TrashMessage is not supported for Google Voice Takeout.
-func (c *Client) TrashMessage(ctx context.Context, messageID string) error {
-	return fmt.Errorf("trash not supported for Google Voice Takeout")
-}
-
-// DeleteMessage is not supported for Google Voice Takeout.
-func (c *Client) DeleteMessage(ctx context.Context, messageID string) error {
-	return fmt.Errorf("delete not supported for Google Voice Takeout")
-}
-
-// BatchDeleteMessages is not supported for Google Voice Takeout.
-func (c *Client) BatchDeleteMessages(ctx context.Context, messageIDs []string) error {
-	return fmt.Errorf("batch delete not supported for Google Voice Takeout")
-}
-
-// formatDuration converts ISO 8601 duration (PT1M23S) to human-readable format.
+// formatDuration converts ISO 8601 duration to human-readable format.
 func formatDuration(iso string) string {
-	// Parse PT{hours}H{minutes}M{seconds}S
 	iso = strings.TrimPrefix(iso, "PT")
 	var parts []string
 
@@ -622,6 +777,3 @@ func formatDuration(iso string) string {
 	}
 	return strings.Join(parts, " ")
 }
-
-// Ensure Client implements gmail.API.
-var _ gmail.API = (*Client)(nil)

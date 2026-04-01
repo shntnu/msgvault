@@ -334,30 +334,6 @@ func TestParseCallHTML_Placed(t *testing.T) {
 	}
 }
 
-func TestNormalizePhone(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"+12023065386", "+12023065386"},
-		{"(202) 306-5386", "+12023065386"},
-		{"2023065386", "+12023065386"},
-		{"+442071234567", "+442071234567"},
-		{"12023065386", "+12023065386"},
-		{"+1 (202) 306-5386", "+12023065386"},
-		{"", ""},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := normalizePhone(tt.input)
-			if got != tt.want {
-				t.Errorf("normalizePhone(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestComputeMessageID(t *testing.T) {
 	id1 := computeMessageID("+12023065386", "2020-02-03T11:37:45Z", "Hello")
 	id2 := computeMessageID("+12023065386", "2020-02-03T11:37:45Z", "Hello")
@@ -371,16 +347,6 @@ func TestComputeMessageID(t *testing.T) {
 	}
 	if len(id1) != 16 {
 		t.Errorf("ID length = %d, want 16", len(id1))
-	}
-}
-
-func TestNormalizeIdentifier(t *testing.T) {
-	email, domain := normalizeIdentifier("+12023065386")
-	if email != "+12023065386@phone.gvoice" {
-		t.Errorf("email = %q, want +12023065386@phone.gvoice", email)
-	}
-	if domain != "phone.gvoice" {
-		t.Errorf("domain = %q, want phone.gvoice", domain)
 	}
 }
 

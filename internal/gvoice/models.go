@@ -96,3 +96,26 @@ type callRecord struct {
 	Duration  string   // ISO 8601 duration (e.g., "PT1M23S")
 	Labels    []string // from the HTML tags section
 }
+
+// ImportSummary holds statistics from a completed import run.
+type ImportSummary struct {
+	MessagesImported      int
+	ConversationsImported int
+	ParticipantsResolved  int
+	Skipped               int
+}
+
+// MessageTypeForFileType maps a Google Voice file type to the
+// message_type string stored in the database.
+func MessageTypeForFileType(ft fileType) string {
+	switch ft {
+	case fileTypeText, fileTypeGroup:
+		return "google_voice_text"
+	case fileTypeReceived, fileTypePlaced, fileTypeMissed:
+		return "google_voice_call"
+	case fileTypeVoicemail:
+		return "google_voice_voicemail"
+	default:
+		return "google_voice_text"
+	}
+}
