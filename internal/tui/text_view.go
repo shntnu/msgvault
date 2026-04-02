@@ -168,7 +168,7 @@ func (m Model) textConversationsView() string {
 
 	// Visible row range
 	// Available data rows = pageSize - header(1) - separator(1) - info(1)
-	availRows := m.pageSize - 5
+	availRows := m.pageSize - 1
 	if availRows < 1 {
 		availRows = 1
 	}
@@ -319,7 +319,7 @@ func (m Model) textAggregateView() string {
 	var sb strings.Builder
 
 	// Available data rows = pageSize - header(1) - separator(1) - info(1)
-	aggAvailRows := m.pageSize - 5
+	aggAvailRows := m.pageSize - 1
 	if aggAvailRows < 1 {
 		aggAvailRows = 1
 	}
