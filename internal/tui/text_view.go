@@ -167,7 +167,12 @@ func (m Model) textConversationsView() string {
 	var sb strings.Builder
 
 	// Visible row range
-	endRow := m.textState.scrollOffset + m.pageSize - 1
+	// Available data rows = pageSize - header(1) - separator(1) - info(1)
+	availRows := m.pageSize - 3
+	if availRows < 1 {
+		availRows = 1
+	}
+	endRow := m.textState.scrollOffset + availRows
 	if endRow > len(m.textState.conversations) {
 		endRow = len(m.textState.conversations)
 	}
@@ -267,7 +272,7 @@ func (m Model) textConversationsView() string {
 
 	// Fill remaining space
 	dataRows := endRow - m.textState.scrollOffset
-	for i := dataRows; i < m.pageSize-1; i++ {
+	for i := dataRows; i < availRows; i++ {
 		sb.WriteString(
 			normalRowStyle.Render(strings.Repeat(" ", m.width)),
 		)
@@ -300,8 +305,12 @@ func (m Model) textAggregateView() string {
 
 	var sb strings.Builder
 
-	// Visible row range
-	endRow := m.textState.scrollOffset + m.pageSize - 1
+	// Available data rows = pageSize - header(1) - separator(1) - info(1)
+	aggAvailRows := m.pageSize - 3
+	if aggAvailRows < 1 {
+		aggAvailRows = 1
+	}
+	endRow := m.textState.scrollOffset + aggAvailRows
 	if endRow > len(m.textState.aggregateRows) {
 		endRow = len(m.textState.aggregateRows)
 	}
@@ -400,7 +409,7 @@ func (m Model) textAggregateView() string {
 	if len(m.textState.aggregateRows) == 0 && !m.loading {
 		dataRows = 1
 	}
-	for i := dataRows; i < m.pageSize-1; i++ {
+	for i := dataRows; i < aggAvailRows; i++ {
 		sb.WriteString(
 			normalRowStyle.Render(strings.Repeat(" ", m.width)),
 		)
