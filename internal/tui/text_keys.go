@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/wesm/msgvault/internal/query"
 )
@@ -213,6 +215,29 @@ func (m Model) handleTextInlineSearchKeys(
 				selectedConvID: m.textState.selectedConvID,
 			},
 		)
+		// In timeline view, filter locally (messages already loaded
+		// with full body text). In other views, use global FTS.
+		if m.textState.level == textLevelTimeline {
+			needle := strings.ToLower(queryStr)
+			var filtered []query.MessageSummary
+			for _, msg := range m.textState.messages {
+				body := strings.ToLower(msg.BodyText)
+				if body == "" {
+					body = strings.ToLower(msg.Snippet)
+				}
+				sender := strings.ToLower(
+					msg.FromName + " " + msg.FromPhone,
+				)
+				if strings.Contains(body, needle) ||
+					strings.Contains(sender, needle) {
+					filtered = append(filtered, msg)
+				}
+			}
+			m.textState.messages = filtered
+			m.textState.cursor = 0
+			m.textState.scrollOffset = 0
+			return m, nil
+		}
 		m.loading = true
 		return m, m.loadTextSearch(queryStr)
 
