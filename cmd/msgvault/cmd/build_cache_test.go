@@ -4127,3 +4127,30 @@ func TestBuildCacheDaemonChildEnvMarksSubprocess(t *testing.T) {
 	assert.Contains(t, got, buildCacheDaemonSubprocessEnv+"=4242", "marks daemon-owned subprocess")
 	assert.NotContains(t, got, buildCacheDaemonSubprocessEnv+"=0", "replaces stale marker")
 }
+
+func TestBuildCacheCSVNormalizesLegacyMessageIDWithoutChangingArchive(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+	t.Setenv("MSGVAULT_FORCE_CSV_SNAPSHOT", "1")
+	tmpDir := setupTestSQLite(t)
+	dbPath := filepath.Join(tmpDir, "test.db")
+	analyticsDir := filepath.Join(tmpDir, "analytics")
+	db, err := sql.Open("sqlite3", dbPath)
+	require.NoError(err)
+	defer func() { _ = db.Close() }()
+	_, err = db.Exec(`UPDATE messages SET rfc822_message_id = CAST(X'80' AS TEXT) WHERE id = 1`)
+	require.NoError(err)
+	result, err := buildCache(dbPath, analyticsDir, true)
+	require.NoError(err)
+	assert.Equal(int64(5), result.ExportedCount)
+	duck, err := sql.Open("duckdb", "")
+	require.NoError(err)
+	defer func() { _ = duck.Close() }()
+	var cached string
+	require.NoError(duck.QueryRow("SELECT rfc822_message_id FROM read_parquet(?) WHERE id = 1",
+		filepath.Join(analyticsDir, "messages", "**", "*.parquet")).Scan(&cached))
+	assert.Equal("\uFFFD", cached)
+	var archived string
+	require.NoError(db.QueryRow(`SELECT hex(rfc822_message_id) FROM messages WHERE id = 1`).Scan(&archived))
+	assert.Equal("80", archived, "cache construction must not modify archived headers")
+}

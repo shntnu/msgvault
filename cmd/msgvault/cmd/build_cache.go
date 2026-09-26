@@ -2128,6 +2128,11 @@ func exportToCSV(db sqlRunner, query string, dest string) error {
 		for i, v := range values {
 			if v.Valid {
 				record[i] = v.String
+				// Legacy Message-ID headers can predate the MIME parser's UTF-8
+				// normalization. Normalize only the derived copy, as parsing does.
+				if cols[i] == "rfc822_message_id" {
+					record[i] = strings.ToValidUTF8(record[i], "\uFFFD")
+				}
 			} else {
 				record[i] = csvNullStr
 			}
